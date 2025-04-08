@@ -41,14 +41,12 @@ public class DropManager {
     };
 
     public void menuOptionClicked(MenuOptionClicked event){
-        if (event.getMenuOption().equalsIgnoreCase("Drop")) {
-            int itemId = event.getMenuEntry().getItemId();
-            if (!ToaPotions.isPotion(itemId)) {
-                return;
-            }
-            WorldPoint location = client.getLocalPlayer().getWorldLocation();
-            pendingDrops.add(new DropManager.PendingDropItem(itemId, location));
+        int itemId = event.getMenuEntry().getItemId();
+        if (!ToaPotions.isPotion(itemId)) {
+            return;
         }
+        WorldPoint location = client.getLocalPlayer().getWorldLocation();
+        pendingDrops.add(new DropManager.PendingDropItem(itemId, location));
     }
 
     public void itemSpawned(ItemSpawned event) {
@@ -76,7 +74,9 @@ public class DropManager {
         if (matchedDrop != null) {
             // Optionally: send message to party
             if (partyService != null) {
-                partyService.send(new TrackedItemMessage(itemId, spawnLocation, client.getLocalPlayer().getName()));
+                if (partyService.isInParty()) {
+                    partyService.send(new TrackedItemMessage(itemId, spawnLocation, client.getLocalPlayer().getName()));
+                }
             }
         }
     }

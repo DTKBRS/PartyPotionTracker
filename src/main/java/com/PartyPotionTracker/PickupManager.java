@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.party.PartyService;
 import javax.inject.Inject;
@@ -21,6 +22,18 @@ public class PickupManager {
         }
     }
 
+    static class ExpectedPickup {
+        int itemId;
+        WorldPoint location;
+        String actionTakenPlayerName;
+
+        public ExpectedPickup(int itemId, WorldPoint location, String actionTakenPlayerName) {
+            this.itemId = itemId;
+            this.location = location;
+            this.actionTakenPlayerName = actionTakenPlayerName;
+        }
+    }
+
 
     private Client client;
     private PartyService partyService;
@@ -33,6 +46,7 @@ public class PickupManager {
 
     }
 
+    private ExpectedPickup lastExpectedPickup = null;
     public final List<PickupManager.PendingDespawn> pendingDespawnItem = new ArrayList<>();
 
     @Getter
@@ -131,12 +145,26 @@ public class PickupManager {
         }
     }
 
-    public void itemContainerChanged(ItemContainerChanged event) {
+    public void menuOptionClicked(MenuOptionClicked event) {
+        int itemId = event.getMenuEntry().getIdentifier();
+        if (!ToaPotions.isPotion(itemId))
+            return;
 
+        WorldPoint location = client.getTopLevelWorldView().getSelectedSceneTile().getWorldLocation();
+
+        if (location != null)
+        {
+            String playerName = client.getLocalPlayer().getName();
+            lastExpectedPickup = new ExpectedPickup(itemId, location, playerName);
+        }
+    }
+
+    public void itemContainerChanged(ItemContainerChanged event) {
         // Return early if it's not an inventory update
         if (event.getContainerId() != InventoryID.INVENTORY.getId()) {
             return;
         }
+
 
         ItemContainer itemContainer = event.getItemContainer();
         Item[] currentItems = itemContainer.getItems();
@@ -151,11 +179,12 @@ public class PickupManager {
         }
 
         // If this is the first time we're seeing inventory, just set inventory and return
-        if (previousInventory == null)
+        if (previousInventory == null || lastExpectedPickup == null)
         {
             previousInventory = currentInventory;
             return;
         }
+
 
         // Combine all unique item IDs from both inventories to catch missing (zeroed) items
         Set<Integer> allItemIds = new HashSet<>();
@@ -176,12 +205,15 @@ public class PickupManager {
                 WorldPoint location = client.getLocalPlayer().getWorldLocation();
                 String localName = client.getLocalPlayer().getName();
                 if (partyService != null) {
-                    partyService.send(new PickedUpItemMessage(itemId, location, localName));
+                    if (partyService.isInParty()) {
+                        partyService.send(new PickedUpItemMessage(itemId, location, localName));
+                    }
                 }
             }
         }
 
         // Update inventory snapshot after processing
+        lastExpectedPickup = null;
         previousInventory = currentInventory;
     }
 }

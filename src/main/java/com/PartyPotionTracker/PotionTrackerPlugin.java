@@ -80,6 +80,7 @@ public class PotionTrackerPlugin extends Plugin
 	@Override
 	protected void shutDown() throws Exception
 	{
+
 		// Clean up
 		overlayManager.remove(overlay);
 		dropManager.pendingDrops.clear();
@@ -98,7 +99,13 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
 		if (inToa){
-			dropManager.menuOptionClicked(event);
+			if (event.getMenuOption().equalsIgnoreCase("Drop")){
+				dropManager.menuOptionClicked(event);
+			}
+			else if (event.getMenuOption().equalsIgnoreCase("Take")){
+				pickupManager.menuOptionClicked(event);
+			}
+
 		}
 	}
 
@@ -133,8 +140,8 @@ public class PotionTrackerPlugin extends Plugin
 	public void onGameStateChanged(GameStateChanged gameState) {
 		if (gameState.getGameState().equals(GameState.LOADING)){
 			pickupManager.pendingDespawnItem.clear();
-			dropManager.pendingDrops.clear();
 			pickupManager.myDroppedItems.clear();
+			dropManager.pendingDrops.clear();
 		}
 	}
 
