@@ -8,15 +8,6 @@ import java.awt.Color;
 @ConfigGroup("PotionTrackerConfig")
 public interface PotionTrackerConfig extends Config{
     @ConfigItem(
-            keyName = "colorPicker",
-            name="Highlight color",
-            description = "Color highlight of the dropped item"
-    )
-    default Color highlightDroppedItem(){
-        return Color.CYAN;
-    }
-
-    @ConfigItem(
             keyName = "usePotionHighlight",
             name="Use potion highlight",
             description = "Whether to use the highlight feature or not"
@@ -24,6 +15,4 @@ public interface PotionTrackerConfig extends Config{
     default boolean usePotionHighlight(){
         return true;
     }
-
-
 }

@@ -3,6 +3,7 @@ package com.PartyPotionTracker;
 import javax.inject.Inject;
 
 import com.google.inject.Provides;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
@@ -13,7 +14,11 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.party.PartyService;
 import net.runelite.client.plugins.Plugin;
+import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.party.PartyPlugin;
+import net.runelite.client.plugins.party.PartyPluginService;
+import net.runelite.client.plugins.party.data.PartyData;
 import net.runelite.client.ui.overlay.OverlayManager;
 import java.awt.*;
 import java.util.*;
@@ -23,6 +28,7 @@ import net.runelite.client.party.WSClient;
 
 
 
+@PluginDependency(PartyPlugin.class)
 @Slf4j
 @PluginDescriptor(
 	name = "Party Potion Tracker",
@@ -49,6 +55,10 @@ public class PotionTrackerPlugin extends Plugin
 	@Inject
 	private PartyService partyService;
 
+	@Getter(AccessLevel.PACKAGE)
+	@Inject
+	private PartyPluginService partyPluginService;
+
 	@Inject private OverlayManager overlayManager;
 
 	@Inject private PotionTrackerOverlay overlay;
@@ -64,15 +74,10 @@ public class PotionTrackerPlugin extends Plugin
 	private PickupManager pickupManager;
 	private DropManager dropManager;
 
-	private final Map<String, Color> partyColorMap = new HashMap<>();
-	private final Color[] colorPool = {
-			Color.CYAN, Color.MAGENTA, Color.ORANGE, Color.GREEN, Color.PINK, Color.YELLOW, Color.RED, Color.BLUE
-	};
-
 	private Boolean inToa = false;
-	private int colorIndex = 0;
 
 	private final List<PendingDespawn> pendingDespawnItem = new ArrayList<>();
+
 
 	@Provides
 	PotionTrackerConfig provideConfig(ConfigManager configManager) {
@@ -183,14 +188,15 @@ public class PotionTrackerPlugin extends Plugin
 
 	public Color getColorForPartyMember(String name)
 	{
-
-		if (partyColorMap.containsKey(name)) {
-			return partyColorMap.get(name);
+		PartyData data = null;
+		if (partyService != null && partyService.isInParty()){
+			data = partyPluginService.getPartyData(partyService.getMemberByDisplayName(name).getMemberId());
 		}
 
-		Color assigned = colorPool[colorIndex % colorPool.length];
-		partyColorMap.put(name, assigned);
-		colorIndex++;
-		return assigned;
+		if (data != null){
+			return data.getColor();
+		}
+
+		return Color.BLACK;
 	}
 }

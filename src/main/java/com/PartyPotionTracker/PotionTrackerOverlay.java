@@ -38,7 +38,7 @@ public class PotionTrackerOverlay extends Overlay {
                 // OPTIONAL: Draw a small dot in center using text location trick
                 Point canvasPoint = Perspective.getCanvasTextLocation(client, graphics, localPoint, ".", 0);
                 if (canvasPoint != null) {
-                    Color potionColor = plugin.getConfig().highlightDroppedItem();
+                    Color potionColor = plugin.getColorForPartyMember(trackedItem.getOwnerName());
                     graphics.setColor(potionColor);
                     graphics.fillOval(canvasPoint.getX() - 3, canvasPoint.getY() - 3, 6, 6);
                 }
