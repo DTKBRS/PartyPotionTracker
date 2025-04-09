@@ -181,6 +181,7 @@ public class PickupManager {
         // If this is the first time we're seeing inventory, just set inventory and return
         if (previousInventory == null || lastExpectedPickup == null)
         {
+            lastExpectedPickup = null;
             previousInventory = currentInventory;
             return;
         }
