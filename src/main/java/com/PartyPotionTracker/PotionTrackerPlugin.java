@@ -1,12 +1,15 @@
 package com.PartyPotionTracker;
 
 import javax.inject.Inject;
+
+import com.google.inject.Provides;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.party.PartyService;
 import net.runelite.client.plugins.Plugin;
@@ -54,6 +57,10 @@ public class PotionTrackerPlugin extends Plugin
 	private net.runelite.client.callback.ClientThread clientThread;
 
 	@Getter
+	@Inject
+	private PotionTrackerConfig config;
+
+	@Getter
 	private PickupManager pickupManager;
 	private DropManager dropManager;
 
@@ -66,6 +73,11 @@ public class PotionTrackerPlugin extends Plugin
 	private int colorIndex = 0;
 
 	private final List<PendingDespawn> pendingDespawnItem = new ArrayList<>();
+
+	@Provides
+	PotionTrackerConfig provideConfig(ConfigManager configManager) {
+		return configManager.getConfig(PotionTrackerConfig.class);
+	}
 
 	@Override
 	protected void startUp() throws Exception
@@ -171,6 +183,7 @@ public class PotionTrackerPlugin extends Plugin
 
 	public Color getColorForPartyMember(String name)
 	{
+
 		if (partyColorMap.containsKey(name)) {
 			return partyColorMap.get(name);
 		}

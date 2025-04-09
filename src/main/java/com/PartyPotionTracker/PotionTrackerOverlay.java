@@ -26,25 +26,24 @@ public class PotionTrackerOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        for (TrackedItem trackedItem : plugin.getPickupManager().getMyDroppedItems())
-        {
-            WorldPoint worldPoint = trackedItem.getWorldPoint();
-            if (worldPoint == null) continue;
+        if (plugin.getConfig().usePotionHighlight()) {
+            for (TrackedItem trackedItem : plugin.getPickupManager().getMyDroppedItems()) {
+                WorldPoint worldPoint = trackedItem.getWorldPoint();
+                if (worldPoint == null) continue;
 
-            // Convert WorldPoint to LocalPoint
-            LocalPoint localPoint = LocalPoint.fromWorld(client.getTopLevelWorldView(), worldPoint);
-            if (localPoint == null) continue;
+                // Convert WorldPoint to LocalPoint
+                LocalPoint localPoint = LocalPoint.fromWorld(client.getTopLevelWorldView(), worldPoint);
+                if (localPoint == null) continue;
 
-            // OPTIONAL: Draw a small dot in center using text location trick
-            Point canvasPoint = Perspective.getCanvasTextLocation(client, graphics, localPoint, ".", 0);
-            if (canvasPoint  != null)
-            {
-                Color potionColor = plugin.getColorForPartyMember(trackedItem.getOwnerName());
-                graphics.setColor(potionColor);
-                graphics.fillOval(canvasPoint.getX() - 3, canvasPoint.getY() - 3, 6, 6);
+                // OPTIONAL: Draw a small dot in center using text location trick
+                Point canvasPoint = Perspective.getCanvasTextLocation(client, graphics, localPoint, ".", 0);
+                if (canvasPoint != null) {
+                    Color potionColor = plugin.getConfig().highlightDroppedItem();
+                    graphics.setColor(potionColor);
+                    graphics.fillOval(canvasPoint.getX() - 3, canvasPoint.getY() - 3, 6, 6);
+                }
             }
         }
-
         return null;
     }
 }
