@@ -8,7 +8,6 @@ import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.party.PartyService;
-import javax.inject.Inject;
 import java.util.*;
 
 @Slf4j
@@ -54,7 +53,7 @@ public class PickupManager {
 
     private Map<Integer, Integer> previousInventory = null;
 
-    public void gameTick(){
+    public void gameTick() {
 
         if (pendingDespawnItem.isEmpty()) return;
 
@@ -146,24 +145,30 @@ public class PickupManager {
     }
 
     public void menuOptionClicked(MenuOptionClicked event) {
-        int itemId = event.getMenuEntry().getIdentifier();
-        if (!ToaPotions.isPotion(itemId))
-            return;
+        if (event.getMenuOption().equalsIgnoreCase("Take")) {
+            int itemId = event.getMenuEntry().getIdentifier();
+            if (!ToaPotions.isPotion(itemId))
+                return;
 
-        WorldPoint location = client.getTopLevelWorldView().getSelectedSceneTile().getWorldLocation();
-        if (location != null)
-        {
-            String playerName = client.getLocalPlayer().getName();
-            lastExpectedPickup = new ExpectedPickup(itemId, location, playerName);
+            if (client.getTopLevelWorldView().getSelectedSceneTile() != null){
+                WorldPoint location = client.getTopLevelWorldView().getSelectedSceneTile().getWorldLocation();
+                if (location != null)
+                {
+                    String playerName = client.getLocalPlayer().getName();
+                    lastExpectedPickup = new ExpectedPickup(itemId, location, playerName);
+                }
+            }
+        } else {
+            lastExpectedPickup = null;
         }
     }
 
     public void itemContainerChanged(ItemContainerChanged event) {
+
         // Return early if it's not an inventory update
         if (event.getContainerId() != InventoryID.INVENTORY.getId()) {
             return;
         }
-
 
         ItemContainer itemContainer = event.getItemContainer();
         Item[] currentItems = itemContainer.getItems();
@@ -183,7 +188,6 @@ public class PickupManager {
             previousInventory = currentInventory;
             return;
         }
-
 
         // Combine all unique item IDs from both inventories to catch missing (zeroed) items
         Set<Integer> allItemIds = new HashSet<>();

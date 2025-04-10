@@ -103,9 +103,7 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
 		if (inToa){
-			if (event.getMenuOption().equalsIgnoreCase("Take")){
-				pickupManager.menuOptionClicked(event);
-			}
+			pickupManager.menuOptionClicked(event);
 		}
 	}
 
