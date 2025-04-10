@@ -17,5 +17,4 @@ public class TrackedItem
         this.worldPoint = worldPoint;
         this.ownerName = ownerName;
     }
-
 }

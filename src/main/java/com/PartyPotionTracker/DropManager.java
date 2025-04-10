@@ -5,11 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ItemSpawned;
-import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.party.PartyService;
-import java.awt.*;
-import java.util.*;
-import java.util.List;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -33,46 +29,19 @@ public class DropManager {
     }
 
 
-
-    public final List<DropManager.PendingDropItem> pendingDrops = new ArrayList<>();
-
-    private final Color[] colorPool = {
-            Color.CYAN, Color.MAGENTA, Color.ORANGE, Color.GREEN, Color.PINK, Color.YELLOW, Color.RED, Color.BLUE
-    };
-
-    public void menuOptionClicked(MenuOptionClicked event){
-        int itemId = event.getMenuEntry().getItemId();
-        if (!ToaPotions.isPotion(itemId)) {
-            return;
-        }
-        WorldPoint location = client.getLocalPlayer().getWorldLocation();
-        pendingDrops.add(new DropManager.PendingDropItem(itemId, location));
-    }
-
     public void itemSpawned(ItemSpawned event) {
+
         TileItem item = event.getItem();
         int itemId = item.getId();
+
         if (!ToaPotions.isPotion(itemId)) {
             return;
         }
-        WorldPoint spawnLocation = event.getTile().getWorldLocation();
-        DropManager.PendingDropItem matchedDrop = null;
-        Iterator<DropManager.PendingDropItem> iter = pendingDrops.iterator();
 
-        while (iter.hasNext()) {
-            DropManager.PendingDropItem drop = iter.next();
+        int isMyPotion = item.getOwnership();
 
-            if (drop.itemId == itemId &&
-                    drop.location.distanceTo(spawnLocation) <= 2)
-            {
-                matchedDrop = drop;
-                iter.remove(); // Clean it up
-                break;
-            }
-        }
-
-        if (matchedDrop != null) {
-            // Optionally: send message to party
+        if (isMyPotion == 1) {
+            WorldPoint spawnLocation = event.getTile().getWorldLocation();
             if (partyService != null) {
                 if (partyService.isInParty()) {
                     partyService.send(new TrackedItemMessage(itemId, spawnLocation, client.getLocalPlayer().getName()));

@@ -21,8 +21,6 @@ import net.runelite.client.plugins.party.PartyPluginService;
 import net.runelite.client.plugins.party.data.PartyData;
 import net.runelite.client.ui.overlay.OverlayManager;
 import java.awt.*;
-import java.util.*;
-import java.util.List;
 import net.runelite.client.party.WSClient;
 
 
@@ -37,15 +35,6 @@ import net.runelite.client.party.WSClient;
 )
 public class PotionTrackerPlugin extends Plugin
 {
-	private static class PendingDespawn {
-		final TrackedItem item;
-		int ageTicks = 0;
-
-		PendingDespawn(TrackedItem item) {
-			this.item = item;
-		}
-	}
-
 	@Inject
 	private WSClient wsClient;
 
@@ -59,9 +48,11 @@ public class PotionTrackerPlugin extends Plugin
 	@Inject
 	private PartyPluginService partyPluginService;
 
-	@Inject private OverlayManager overlayManager;
+	@Inject
+	private OverlayManager overlayManager;
 
-	@Inject private PotionTrackerOverlay overlay;
+	@Inject
+	private PotionTrackerOverlay overlay;
 
 	@Inject
 	private net.runelite.client.callback.ClientThread clientThread;
@@ -75,8 +66,6 @@ public class PotionTrackerPlugin extends Plugin
 	private DropManager dropManager;
 
 	private Boolean inToa = false;
-
-	private final List<PendingDespawn> pendingDespawnItem = new ArrayList<>();
 
 
 	@Provides
@@ -100,8 +89,6 @@ public class PotionTrackerPlugin extends Plugin
 
 		// Clean up
 		overlayManager.remove(overlay);
-		dropManager.pendingDrops.clear();
-		pendingDespawnItem.clear();
 		wsClient.unregisterMessage(PickedUpItemMessage.class);
 		wsClient.unregisterMessage(TrackedItemMessage.class);
 	}
@@ -116,13 +103,9 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
 		if (inToa){
-			if (event.getMenuOption().equalsIgnoreCase("Drop")){
-				dropManager.menuOptionClicked(event);
-			}
-			else if (event.getMenuOption().equalsIgnoreCase("Take")){
+			if (event.getMenuOption().equalsIgnoreCase("Take")){
 				pickupManager.menuOptionClicked(event);
 			}
-
 		}
 	}
 
@@ -158,7 +141,6 @@ public class PotionTrackerPlugin extends Plugin
 		if (gameState.getGameState().equals(GameState.LOADING)){
 			pickupManager.pendingDespawnItem.clear();
 			pickupManager.myDroppedItems.clear();
-			dropManager.pendingDrops.clear();
 		}
 	}
 

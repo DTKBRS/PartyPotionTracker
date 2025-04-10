@@ -151,7 +151,6 @@ public class PickupManager {
             return;
 
         WorldPoint location = client.getTopLevelWorldView().getSelectedSceneTile().getWorldLocation();
-
         if (location != null)
         {
             String playerName = client.getLocalPlayer().getName();
