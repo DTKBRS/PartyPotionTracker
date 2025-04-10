@@ -3,5 +3,5 @@
 
 # Examples
 - Video of a party member taking my potion
-- 
+
 ![Potion Example.gif](../Potion%20Example.gif)
