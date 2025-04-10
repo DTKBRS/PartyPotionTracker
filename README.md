@@ -4,4 +4,4 @@
 # Examples
 - Video of a party member taking my potion
 
-![Potion Example.gif](../Potion%20Example.gif)
+![Potion Example](https://github.com/user-attachments/assets/455c8506-f56b-4be5-92e4-5b6891a3dd91)
