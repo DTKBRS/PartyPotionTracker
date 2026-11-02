@@ -1,11 +1,12 @@
 package com.PartyPotionTracker;
 
-import java.util.*;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.*;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.party.PartyService;
+
+import java.util.*;
 
 /** Correlates local Drop intent, inventory loss and ground evidence in either event order. */
 public class DropManager {
@@ -48,14 +49,20 @@ public class DropManager {
             pending.clear();
             return;
         }
-        if (event.isConsumed() || (event.getMenuAction() != MenuAction.CC_OP
-                && event.getMenuAction() != MenuAction.CC_OP_LOW_PRIORITY)
+        if (event.isConsumed()
+                || (event.getMenuAction() != MenuAction.CC_OP
+                        && event.getMenuAction() != MenuAction.CC_OP_LOW_PRIORITY)
                 || event.getParam1() != WidgetInfo.INVENTORY.getId()
-                || client.getLocalPlayer() == null || !RaidSupplies.isTrackable(client, event.getItemId())) return;
+                || client.getLocalPlayer() == null
+                || !RaidSupplies.isTrackable(client, event.getItemId())) return;
         if (inventory == null) inventory = snapshot(client.getItemContainer(InventoryID.INVENTORY));
         if (pending.size() >= 28) return;
-        pending.add(new Intent(event.getItemId(), client.getLocalPlayer().getWorldLocation(),
-                client.getTickCount(), client.getLocalPlayer().getName()));
+        pending.add(
+                new Intent(
+                        event.getItemId(),
+                        client.getLocalPlayer().getWorldLocation(),
+                        client.getTickCount(),
+                        client.getLocalPlayer().getName()));
     }
 
     public void itemContainerChanged(ItemContainerChanged event) {
@@ -63,7 +70,8 @@ public class DropManager {
         Map<Integer, Integer> current = snapshot(event.getItemContainer());
         if (inventory != null) {
             Map<Integer, Integer> losses = new HashMap<>();
-            inventory.forEach((id, qty) -> losses.put(id, Math.max(0, qty - current.getOrDefault(id, 0))));
+            inventory.forEach(
+                    (id, qty) -> losses.put(id, Math.max(0, qty - current.getOrDefault(id, 0))));
             for (Intent intent : pending) {
                 int loss = losses.getOrDefault(intent.itemId, 0);
                 if (!intent.inventoryLost && loss > 0 && fresh(intent)) {
@@ -77,18 +85,26 @@ public class DropManager {
     }
 
     public void itemSpawned(ItemSpawned event) {
-        groundAdded(event.getItem().getId(), event.getTile().getWorldLocation(), event.getItem().getQuantity());
+        groundAdded(
+                event.getItem().getId(),
+                event.getTile().getWorldLocation(),
+                event.getItem().getQuantity());
     }
 
     public void itemQuantityChanged(ItemQuantityChanged event) {
-        groundAdded(event.getItem().getId(), event.getTile().getWorldLocation(),
+        groundAdded(
+                event.getItem().getId(),
+                event.getTile().getWorldLocation(),
                 event.getNewQuantity() - event.getOldQuantity());
     }
 
     private void groundAdded(int id, WorldPoint tile, int quantity) {
         for (Intent intent : pending) {
             if (quantity <= 0) break;
-            if (!intent.groundAdded && fresh(intent) && intent.itemId == id && intent.tile.equals(tile)) {
+            if (!intent.groundAdded
+                    && fresh(intent)
+                    && intent.itemId == id
+                    && intent.tile.equals(tile)) {
                 intent.groundAdded = true;
                 quantity--;
             }
@@ -111,7 +127,8 @@ public class DropManager {
             Intent intent = it.next();
             if (!fresh(intent) || !intent.inventoryLost || !intent.groundAdded) continue;
             it.remove();
-            TrackedItemMessage message = new TrackedItemMessage(intent.itemId, intent.tile, intent.owner);
+            TrackedItemMessage message =
+                    new TrackedItemMessage(intent.itemId, intent.tile, intent.owner);
             pickupManager.prepare(message);
             pickupManager.submitDrop(message);
         }
@@ -119,9 +136,10 @@ public class DropManager {
 
     private static Map<Integer, Integer> snapshot(ItemContainer container) {
         Map<Integer, Integer> result = new HashMap<>();
-        if (container != null) for (Item item : container.getItems()) {
-            if (item.getId() >= 0) result.merge(item.getId(), item.getQuantity(), Integer::sum);
-        }
+        if (container != null)
+            for (Item item : container.getItems()) {
+                if (item.getId() >= 0) result.merge(item.getId(), item.getQuantity(), Integer::sum);
+            }
         return result;
     }
 }

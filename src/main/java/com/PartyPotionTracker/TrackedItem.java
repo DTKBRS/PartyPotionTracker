@@ -2,13 +2,13 @@ package com.PartyPotionTracker;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+
 import net.runelite.api.coords.WorldPoint;
 
 @Getter
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class TrackedItem {
-    @EqualsAndHashCode.Include
-    private final String dropId;
+    @EqualsAndHashCode.Include private final String dropId;
     private final int itemId;
     private final WorldPoint worldPoint;
     private final String ownerName;
@@ -19,7 +19,13 @@ public class TrackedItem {
         this(java.util.UUID.randomUUID().toString(), itemId, point, owner, 1, false);
     }
 
-    public TrackedItem(String dropId, int itemId, WorldPoint point, String owner, int quantity, boolean ambiguous) {
+    public TrackedItem(
+            String dropId,
+            int itemId,
+            WorldPoint point,
+            String owner,
+            int quantity,
+            boolean ambiguous) {
         this.dropId = dropId;
         this.itemId = itemId;
         this.worldPoint = point;
@@ -28,7 +34,9 @@ public class TrackedItem {
         this.ambiguous = ambiguous;
     }
 
-    void markAmbiguous() { ambiguous = true; }
+    void markAmbiguous() {
+        ambiguous = true;
+    }
 
     void consume(int amount) {
         quantity = Math.max(0, quantity - amount);

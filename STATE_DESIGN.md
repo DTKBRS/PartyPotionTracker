@@ -2,8 +2,9 @@
 
 ## Authority and scope
 
-A group explicitly chooses a coordinator display name and a fresh shared raid-session
-code in plugin settings. Party membership, world, raid type and that code scope every
+A group chooses a fresh shared raid-session code in plugin settings. By default the
+coordinator is selected through automatic participant discovery. Optional manual mode
+retains explicit coordinator selection. Party membership, world, raid type and that code scope every
 message. No custom server or HTTP API is used. RuneLite party messages are the transport.
 The code is a user-established instance identity, not a game-provided instance ID.
 
@@ -30,12 +31,13 @@ pending until accepted. Ground observations are local display information.
 Heartbeats expose the latest revision. A replica with a gap asks for a snapshot;
 late joiners do the same. Snapshots are split into bounded chunks and correlated with
 request IDs. Pending local reports are retried with the same IDs after synchronization.
-An unreachable coordinator leaves read-only stale copies. There is no automatic election.
+An unreachable coordinator leaves read-only stale copies. A timeout never bootstraps a replacement authority.
 
 A graceful handoff is initiated explicitly by the current coordinator. Clients that
 receive its commit accept the target's new term; clients that miss the commit stay paused
 and can recover via the old coordinator's redirect while it remains connected. After
-handoff, update the configured coordinator name for late joins/restarts. If both authority
+handoff, automatic presence advertises the successor for late joins. In manual mode,
+update the configured coordinator name for late joins/restarts. If both authority
 and its transfer evidence are lost, use a fresh shared code to start a new empty session;
 never silently promote an arbitrary cached replica.
 
@@ -56,9 +58,23 @@ and `COMMIT` implement a graceful handoff; the old authority retains a redirect.
 All transitions occur on RuneLite's client thread. The protocol engine itself has
 no client/event-bus dependencies and is exercised by a serialized in-memory transport.
 
-The initial coordinator is chosen through configuration, not an election. A recent
-coordinator-scope fingerprint guard survives plugin restarts, preventing accidental
-reuse of an empty coordinator record under the same code. History is not persisted;
+Automatic initial election uses `CoordinatorPresenceMessage` protocol 1. The roster
+contains only recent compatible presence messages from logged-in members of the same
+RuneLite party and matching world/raid/session scope. Members without this plugin are
+not candidates. After 15 stable ticks and 6 agreement ticks, the lowest member ID can
+bootstrap if every discovered participant advertises the same roster. Existing authority
+claims take precedence over a new election, including hints from followers whose leader
+is temporarily unavailable. New arrivals never displace an established coordinator.
+
+Presence is repeated every 3 ticks; duplicate/out-of-order sequences do not refresh its
+20-tick freshness window. Missing presence prevents processing shared-state traffic from
+that peer. A missing coordinator pauses tracking but does not elect an empty replacement.
+Local action reports are buffered during discovery (maximum 100); overflow pauses the
+session instead of silently proceeding with an incomplete local history.
+
+A recent session-scope fingerprint guard survives plugin restarts. Every automatic-mode
+participant records it when authority becomes known, preventing accidental bootstrap of
+an empty coordinator record under a previously used code. History is not persisted;
 crash recovery without a completed handoff deliberately requires a fresh code.
 
 Snapshots contain the complete accepted history (bounded to 500 events), including
@@ -70,3 +86,20 @@ This is an explicit-authority protocol, not general-purpose consensus. It assume
 members agree on configuration and trust the selected coordinator. It cannot infer
 server instance identity or recover unreported actions. Before release, test actual
 RuneLite transport throughput, handoff interruptions and client restarts in-game.
+
+
+## Bootstrap partition limitation
+
+The discovery roster is not an authoritative global electorate. A member without the
+plugin cannot acknowledge presence, and silence cannot distinguish that situation from
+a disconnected compatible plugin. Therefore disconnected subgroups can each bootstrap
+before discovering one another. On conflicting coordinator claims, ground updates and
+fresh highlights stop; a fresh session code is required. An authenticated shared-state
+handoff can resolve a transient conflict caused by reordered presence/commit delivery.
+Old coordinator claims after that handoff are ignored.
+
+This is deliberately **not** Raft or automatic crash failover. The accepted history is
+not quorum-committed or persisted, so promoting a cached replica after a timeout could
+lose accepted events. Implementing that stronger guarantee requires a separately agreed
+membership configuration, durable voting state and quorum-backed log commitment. The
+inventory panel remains independent of coordinator availability.

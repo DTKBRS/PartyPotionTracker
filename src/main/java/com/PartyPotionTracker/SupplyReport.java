@@ -1,11 +1,16 @@
 package com.PartyPotionTracker;
 
-import java.util.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
 import net.runelite.api.coords.WorldPoint;
 
-/** An immutable-by-convention report copied at the protocol boundary. */
+import java.util.*;
+
+/**
+ * A drop or pickup reported by one player. Copies keep incoming messages separate from stored
+ * history.
+ */
 @Data
 @NoArgsConstructor
 public class SupplyReport {
@@ -18,31 +23,55 @@ public class SupplyReport {
     private List<String> dropIds = new ArrayList<>();
 
     static SupplyReport from(SupplyEventMessage event) {
-        SupplyReport r = new SupplyReport();
-        r.id = event.getEventId();
-        r.quantity = event.getQuantity();
+        SupplyReport report = new SupplyReport();
+        report.id = event.getEventId();
+        report.quantity = event.getQuantity();
         if (event instanceof TrackedItemMessage) {
-            TrackedItemMessage d = (TrackedItemMessage) event;
-            r.drop = true; r.actor = d.getOwnerName(); r.itemId = d.getItemId(); r.tile = d.getWorldPoint();
+            TrackedItemMessage dropEvent = (TrackedItemMessage) event;
+            report.drop = true;
+            report.actor = dropEvent.getOwnerName();
+            report.itemId = dropEvent.getItemId();
+            report.tile = dropEvent.getWorldPoint();
         } else {
             PickedUpItemMessage take = (PickedUpItemMessage) event;
-            r.actor = take.getPickerName(); r.itemId = take.getItemId(); r.tile = take.getWorldPoint();
-            r.dropIds = take.getDropIds() == null ? new ArrayList<>() : new ArrayList<>(take.getDropIds());
+            report.actor = take.getPickerName();
+            report.itemId = take.getItemId();
+            report.tile = take.getWorldPoint();
+            report.dropIds =
+                    take.getDropIds() == null
+                            ? new ArrayList<>()
+                            : new ArrayList<>(take.getDropIds());
         }
-        return r;
+        return report;
     }
 
     SupplyReport copy() {
-        SupplyReport r = new SupplyReport();
-        r.id = id; r.drop = drop; r.actor = actor; r.itemId = itemId; r.tile = tile; r.quantity = quantity;
-        r.dropIds = dropIds == null ? null : new ArrayList<>(dropIds);
-        return r;
+        SupplyReport report = new SupplyReport();
+        report.id = id;
+        report.drop = drop;
+        report.actor = actor;
+        report.itemId = itemId;
+        report.tile = tile;
+        report.quantity = quantity;
+        report.dropIds = dropIds == null ? null : new ArrayList<>(dropIds);
+        return report;
     }
 
     boolean valid() {
-        return id != null && id.length() <= 100 && !id.isEmpty() && actor != null && !actor.isEmpty()
-                && actor.length() <= 50 && itemId >= 0 && tile != null && tile.getPlane() >= 0 && tile.getPlane() <= 3
-                && quantity > 0 && quantity <= 28 && dropIds != null && dropIds.size() <= 100
+        return id != null
+                && id.length() <= 100
+                && !id.isEmpty()
+                && actor != null
+                && !actor.isEmpty()
+                && actor.length() <= 50
+                && itemId >= 0
+                && tile != null
+                && tile.getPlane() >= 0
+                && tile.getPlane() <= 3
+                && quantity > 0
+                && quantity <= 28
+                && dropIds != null
+                && dropIds.size() <= 100
                 && dropIds.stream().allMatch(x -> x != null && !x.isEmpty() && x.length() <= 100)
                 && (drop || !dropIds.isEmpty());
     }

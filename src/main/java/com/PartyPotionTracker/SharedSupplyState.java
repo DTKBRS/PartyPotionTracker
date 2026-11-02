@@ -3,60 +3,104 @@ package com.PartyPotionTracker;
 import java.util.*;
 import java.util.function.Consumer;
 
-/** Single-writer replicated event history. No RuneLite/client thread dependencies. */
+/**
+ * Keeps the party's accepted supply history in order.
+ *
+ * <p>Only the selected coordinator accepts reports and assigns revisions. Other members keep a
+ * copy, retry their unconfirmed reports, and request a snapshot when they miss an update. Local
+ * observations never directly change this shared history.
+ *
+ * <p>All calls are serialized by the plugin on the client thread. This class itself does not depend
+ * on RuneLite client events or networking.
+ */
 final class SharedSupplyState {
     static final int MAX_EVENTS = 500;
-    static final int CHUNK = 10;
-    static final int TIMEOUT = 20;
-    private final long self;
+    static final int SNAPSHOT_CHUNK_SIZE = 10;
+    static final int COORDINATOR_TIMEOUT_TICKS = 20;
+    private static final int MAX_PENDING_REPORTS = 100;
+    private static final int MAX_DEFERRED_REPORTS = 100;
+    private static final int MAX_QUEUED_SNAPSHOT_CHUNKS = 400;
+    private static final int SNAPSHOT_CHUNKS_PER_TICK = 2;
+    private static final int HEARTBEAT_INTERVAL_TICKS = 5;
+    private static final int REPORT_RETRY_INTERVAL_TICKS = 5;
+    private static final int HANDOFF_RETRY_INTERVAL_TICKS = 10;
+    private static final int SNAPSHOT_REQUEST_INTERVAL_TICKS = 20;
+    private static final int SNAPSHOT_RETRY_INTERVAL_TICKS = 60;
+
+    private final long localMemberId;
     private final String scope;
     private final Consumer<SupplyStateMessage> transport;
     private final List<SupplyReport> history = new ArrayList<>();
+    private final List<SupplyEventRecord> eventLog = new ArrayList<>();
     private final Map<String, SupplyReport> pending = new LinkedHashMap<>();
-    private final Map<String, Deferred> deferred = new LinkedHashMap<>();
-    private final Map<String, Integer> accepted = new HashMap<>();
-    private final Map<String, SupplyReport> balances = new LinkedHashMap<>();
-    private long leader;
+    private final Map<String, ReportWaitingForDrops> reportsWaitingForDrops = new LinkedHashMap<>();
+    private final Map<String, Integer> acceptedEventIndexes = new HashMap<>();
+    private final Map<String, SupplyReport> remainingDrops = new LinkedHashMap<>();
+    private long coordinatorMemberId;
+    // A unique ID for this coordinator's tenure. Old-tenure messages cannot change current state.
     private String term;
     private int tick;
-    private int lastContact = -1000;
-    private int lastRequest = -1000;
+    private int lastCoordinatorContactTick = -1000;
+    private int lastSnapshotRequestTick = -1000;
     private boolean ready;
     private boolean frozen;
     private String request;
-    private Assembly assembly;
-    private Assembly transfer;
-    private long transferTarget;
-    private String transferId;
+    private SnapshotAssembly recoverySnapshot;
+    private SnapshotAssembly handoffSnapshot;
+    private long handoffTargetMemberId;
+    private String handoffRequestId;
     private String nextTerm;
     private SupplyStateMessage redirect;
     private String problem = "";
     private long generation;
-    private long advertisedRevision;
+    private long latestCoordinatorRevision;
     private boolean transportConnected = true;
     private final Deque<SupplyStateMessage> snapshotOutbox = new ArrayDeque<>();
 
-    private static final class Deferred {
+    private static final class ReportWaitingForDrops {
         final long sender;
         final SupplyReport report;
         final int tick;
-        Deferred(long sender, SupplyReport report, int tick) { this.sender = sender; this.report = report; this.tick = tick; }
+
+        ReportWaitingForDrops(long sender, SupplyReport report, int tick) {
+            this.sender = sender;
+            this.report = report;
+            this.tick = tick;
+        }
     }
-    private static final class Assembly {
+
+    private static final class SnapshotAssembly {
         final String id;
         final String term;
         final long revision;
         final int count;
         final Map<Integer, List<SupplyReport>> chunks = new HashMap<>();
-        Assembly(SupplyStateMessage m) { id = m.request; term = m.term; revision = m.revision; count = m.parts; }
-        boolean add(SupplyStateMessage m) {
-            if (!Objects.equals(id, m.request) || !Objects.equals(term, m.term) || revision != m.revision || count != m.parts
-                    || m.part < 0 || m.part >= count || m.history == null || m.history.size() > CHUNK) return false;
+
+        SnapshotAssembly(SupplyStateMessage message) {
+            id = message.request;
+            term = message.term;
+            revision = message.revision;
+            count = message.parts;
+        }
+
+        boolean add(SupplyStateMessage message) {
+            if (!Objects.equals(id, message.request)
+                    || !Objects.equals(term, message.term)
+                    || revision != message.revision
+                    || count != message.parts
+                    || message.part < 0
+                    || message.part >= count
+                    || message.history == null
+                    || message.history.size() > SNAPSHOT_CHUNK_SIZE) return false;
             List<SupplyReport> copy = new ArrayList<>();
-            for (SupplyReport r : m.history) { if (r == null || !r.valid()) return false; copy.add(r.copy()); }
-            chunks.putIfAbsent(m.part, copy);
+            for (SupplyReport report : message.history) {
+                if (report == null || !report.valid()) return false;
+                copy.add(report.copy());
+            }
+            chunks.putIfAbsent(message.part, copy);
             return true;
         }
+
         List<SupplyReport> complete() {
             if (chunks.size() != count) return null;
             List<SupplyReport> result = new ArrayList<>();
@@ -65,243 +109,525 @@ final class SharedSupplyState {
         }
     }
 
-    SharedSupplyState(long self, long leader, String scope, Consumer<SupplyStateMessage> transport) {
-        this.self = self; this.leader = leader; this.scope = scope; this.transport = transport;
-        if (self == leader) { term = UUID.randomUUID().toString(); ready = true; lastContact = 0; }
+    SharedSupplyState(
+            long localMemberId,
+            long coordinatorMemberId,
+            String scope,
+            Consumer<SupplyStateMessage> transport) {
+        this.localMemberId = localMemberId;
+        this.coordinatorMemberId = coordinatorMemberId;
+        this.scope = scope;
+        this.transport = transport;
+        if (localMemberId == coordinatorMemberId) {
+            term = UUID.randomUUID().toString();
+            ready = true;
+            lastCoordinatorContactTick = 0;
+        }
     }
 
-    long leader() { return leader; }
-    String term() { return term; }
-    long revision() { return history.size(); }
-    long generation() { return generation; }
-    int pendingCount() { return pending.size(); }
-    boolean synchronizedState() { return transportConnected && ready && !frozen && (leader == self || tick - lastContact <= TIMEOUT); }
+    long leader() {
+        return coordinatorMemberId;
+    }
+
+    String term() {
+        return term;
+    }
+
+    long revision() {
+        return history.size();
+    }
+
+    long generation() {
+        return generation;
+    }
+
+    int pendingCount() {
+        return pending.size();
+    }
+
+    boolean synchronizedState() {
+        return transportConnected
+                && ready
+                && !frozen
+                && (coordinatorMemberId == localMemberId
+                        || tick - lastCoordinatorContactTick <= COORDINATOR_TIMEOUT_TICKS);
+    }
+
     List<SupplyReport> history() {
         List<SupplyReport> result = new ArrayList<>();
-        history.forEach(r -> result.add(r.copy()));
+        history.forEach(report -> result.add(report.copy()));
         return result;
     }
+
+    List<SupplyEventRecord> eventLog() {
+        return Collections.unmodifiableList(new ArrayList<>(eventLog));
+    }
+
     List<String> pendingDropIds(int item, net.runelite.api.coords.WorldPoint tile) {
         List<String> result = new ArrayList<>();
-        pending.values().stream().filter(r -> r.isDrop() && r.getItemId() == item && r.getTile().equals(tile))
-                .forEach(r -> result.add(r.getId()));
+        pending.values().stream()
+                .filter(
+                        report ->
+                                report.isDrop()
+                                        && report.getItemId() == item
+                                        && report.getTile().equals(tile))
+                .forEach(report -> result.add(report.getId()));
         return result;
     }
+
     String status() {
         if (!problem.isEmpty()) return problem;
         if (!transportConnected) return "Paused: party connection unavailable";
         if (frozen) return "Paused: coordinator handoff";
-        if (!synchronizedState()) return ready ? "Paused: coordinator unavailable" : "Syncing with coordinator";
-        return (self == leader ? "Coordinator" : "Synchronized") + " · revision " + revision() + " · pending " + pending.size();
+        if (!synchronizedState())
+            return ready ? "Paused: coordinator unavailable" : "Syncing with coordinator";
+        return (localMemberId == coordinatorMemberId ? "Coordinator" : "Synchronized")
+                + " · revision "
+                + revision()
+                + " · pending "
+                + pending.size();
     }
-    private SupplyStateMessage message(String kind, long target) {
-        SupplyStateMessage m = new SupplyStateMessage();
-        m.scope = scope; m.kind = kind; m.target = target; m.term = term; m.revision = revision();
-        return m;
+
+    private SupplyStateMessage createMessage(String kind, long target) {
+        SupplyStateMessage message = new SupplyStateMessage();
+        message.scope = scope;
+        message.kind = kind;
+        message.target = target;
+        message.term = term;
+        message.revision = revision();
+        return message;
     }
-    private void send(SupplyStateMessage m) { transport.accept(m); }
+
+    private void send(SupplyStateMessage message) {
+        transport.accept(message);
+    }
 
     void submit(SupplyReport report) {
-        if (report == null || !report.valid() || pending.size() >= 100) { problem = "Report rejected: invalid or pending limit"; return; }
-        if (accepted.containsKey(report.getId())) return;
+        if (report == null || !report.valid() || pending.size() >= MAX_PENDING_REPORTS) {
+            problem = "Report rejected: invalid or pending limit";
+            return;
+        }
+        if (acceptedEventIndexes.containsKey(report.getId())) return;
         pending.putIfAbsent(report.getId(), report.copy());
         if (synchronizedState()) sendReport(report);
     }
+
     private void sendReport(SupplyReport report) {
-        if (self == leader) acceptReport(self, report);
-        else { SupplyStateMessage m = message("REPORT", leader); m.report = report.copy(); send(m); }
+        if (localMemberId == coordinatorMemberId) acceptReport(localMemberId, report);
+        else {
+            SupplyStateMessage message = createMessage("REPORT", coordinatorMemberId);
+            message.report = report.copy();
+            send(message);
+        }
     }
+
     void tick() {
         tick++;
-        for (int i = 0; i < 2 && !snapshotOutbox.isEmpty(); i++) send(snapshotOutbox.removeFirst());
-        if (self == leader && tick % 5 == 0) send(message(frozen ? "FROZEN" : "HEARTBEAT", 0));
-        if (transferTarget != 0 && self == leader && tick % 10 == 0) sendSnapshot("TRANSFER", transferTarget, transferId);
-        if (self != leader && !synchronizedState()) requestSnapshot();
-        if (synchronizedState() && tick % 5 == 0) new ArrayList<>(pending.values()).forEach(this::sendReport);
-        if (self == leader && !frozen) {
-            for (Deferred d : new ArrayList<>(deferred.values())) {
-                if (dependenciesKnown(d.report)) { deferred.remove(d.report.getId()); acceptReport(d.sender, d.report); }
-                else if (tick - d.tick > TIMEOUT) { deferred.remove(d.report.getId()); reject(d.sender, d.report); }
+        for (int i = 0; i < SNAPSHOT_CHUNKS_PER_TICK && !snapshotOutbox.isEmpty(); i++)
+            send(snapshotOutbox.removeFirst());
+        if (localMemberId == coordinatorMemberId && tick % HEARTBEAT_INTERVAL_TICKS == 0)
+            send(createMessage(frozen ? "FROZEN" : "HEARTBEAT", 0));
+        if (handoffTargetMemberId != 0
+                && localMemberId == coordinatorMemberId
+                && tick % HANDOFF_RETRY_INTERVAL_TICKS == 0)
+            sendSnapshot("TRANSFER", handoffTargetMemberId, handoffRequestId);
+        if (localMemberId != coordinatorMemberId && !synchronizedState()) requestSnapshot();
+        if (synchronizedState() && tick % REPORT_RETRY_INTERVAL_TICKS == 0)
+            new ArrayList<>(pending.values()).forEach(this::sendReport);
+        if (localMemberId == coordinatorMemberId && !frozen) {
+            retryReportsWaitingForDrops();
+        }
+    }
+
+    // A pickup may arrive before its drop report because party messages can arrive out of order.
+    private void retryReportsWaitingForDrops() {
+        for (ReportWaitingForDrops waitingReport :
+                new ArrayList<>(reportsWaitingForDrops.values())) {
+            if (hasReferencedDrops(waitingReport.report)) {
+                reportsWaitingForDrops.remove(waitingReport.report.getId());
+                acceptReport(waitingReport.sender, waitingReport.report);
+            } else if (tick - waitingReport.tick > COORDINATOR_TIMEOUT_TICKS) {
+                reportsWaitingForDrops.remove(waitingReport.report.getId());
+                reject(waitingReport.sender, waitingReport.report);
             }
         }
     }
-    void disconnected() { lastContact = tick - TIMEOUT - 1; }
-    void transportFailed() { transportConnected = false; }
-    void transportRestored() { transportConnected = true; }
+
+    void disconnected() {
+        lastCoordinatorContactTick = tick - COORDINATOR_TIMEOUT_TICKS - 1;
+    }
+
+    void transportFailed() {
+        transportConnected = false;
+    }
+
+    void transportRestored() {
+        transportConnected = true;
+    }
+
     private void requestSnapshot() {
-        if (tick - lastRequest < 20 || (request != null && tick - lastRequest < 60)) return;
-        lastRequest = tick; request = UUID.randomUUID().toString(); assembly = null;
-        SupplyStateMessage m = message("REQUEST", leader); m.request = request; send(m);
+        if (tick - lastSnapshotRequestTick < SNAPSHOT_REQUEST_INTERVAL_TICKS
+                || (request != null
+                        && tick - lastSnapshotRequestTick < SNAPSHOT_RETRY_INTERVAL_TICKS)) return;
+        lastSnapshotRequestTick = tick;
+        request = UUID.randomUUID().toString();
+        recoverySnapshot = null;
+        SupplyStateMessage message = createMessage("REQUEST", coordinatorMemberId);
+        message.request = request;
+        send(message);
     }
+
     void handoff(long target) {
-        if (self != leader || !synchronizedState() || target == 0 || target == self) return;
-        frozen = true; transferTarget = target; transferId = UUID.randomUUID().toString(); nextTerm = UUID.randomUUID().toString();
-        send(message("FROZEN", 0));
-        sendSnapshot("TRANSFER", target, transferId);
+        if (localMemberId != coordinatorMemberId
+                || !synchronizedState()
+                || target == 0
+                || target == localMemberId) return;
+        frozen = true;
+        handoffTargetMemberId = target;
+        handoffRequestId = UUID.randomUUID().toString();
+        nextTerm = UUID.randomUUID().toString();
+        send(createMessage("FROZEN", 0));
+        sendSnapshot("TRANSFER", target, handoffRequestId);
     }
+
     void cancelHandoff() {
-        if (self != leader || transferTarget == 0) return;
-        snapshotOutbox.removeIf(m -> "TRANSFER".equals(m.kind));
-        transferTarget = 0; transferId = null; nextTerm = null; frozen = false;
-        send(message("HEARTBEAT", 0));
+        if (localMemberId != coordinatorMemberId || handoffTargetMemberId == 0) return;
+        snapshotOutbox.removeIf(message -> "TRANSFER".equals(message.kind));
+        handoffTargetMemberId = 0;
+        handoffRequestId = null;
+        nextTerm = null;
+        frozen = false;
+        send(createMessage("HEARTBEAT", 0));
     }
+
     private void sendSnapshot(String kind, long target, String id) {
-        if (snapshotOutbox.stream().anyMatch(m -> kind.equals(m.kind) && m.target == target && Objects.equals(m.request, id))) return;
-        snapshotOutbox.removeIf(m -> kind.equals(m.kind) && m.target == target);
-        int count = Math.max(1, (history.size() + CHUNK - 1) / CHUNK);
-        if (snapshotOutbox.size() + count > 400) return;
+        if (snapshotOutbox.stream()
+                .anyMatch(
+                        message ->
+                                kind.equals(message.kind)
+                                        && message.target == target
+                                        && Objects.equals(message.request, id))) return;
+        snapshotOutbox.removeIf(message -> kind.equals(message.kind) && message.target == target);
+        int count = Math.max(1, (history.size() + SNAPSHOT_CHUNK_SIZE - 1) / SNAPSHOT_CHUNK_SIZE);
+        if (snapshotOutbox.size() + count > MAX_QUEUED_SNAPSHOT_CHUNKS) return;
         for (int i = 0; i < count; i++) {
-            SupplyStateMessage m = message(kind, target);
-            m.request = id; m.part = i; m.parts = count; m.nextTerm = nextTerm; m.paused = frozen;
-            m.history = new ArrayList<>();
-            for (int j = i * CHUNK; j < Math.min(history.size(), (i + 1) * CHUNK); j++) m.history.add(history.get(j).copy());
-            snapshotOutbox.addLast(m);
+            SupplyStateMessage message = createMessage(kind, target);
+            message.request = id;
+            message.part = i;
+            message.parts = count;
+            message.nextTerm = nextTerm;
+            message.paused = frozen;
+            message.history = new ArrayList<>();
+            for (int j = i * SNAPSHOT_CHUNK_SIZE;
+                    j < Math.min(history.size(), (i + 1) * SNAPSHOT_CHUNK_SIZE);
+                    j++) message.history.add(history.get(j).copy());
+            snapshotOutbox.addLast(message);
         }
     }
-    void receive(long sender, String senderName, SupplyStateMessage m) {
-        if (m == null || m.protocol != 3 || !scope.equals(m.scope) || m.kind == null
-                || m.revision < 0 || m.revision > MAX_EVENTS || (m.target != 0 && m.target != self)) return;
-        if ("REQUEST".equals(m.kind)) {
-            if (m.request == null || m.request.length() > 100) return;
-            if (self == leader) sendSnapshot("SNAPSHOT", sender, m.request);
-            else if (redirect != null) send(redirect);
+
+    void receive(long sender, String senderName, SupplyStateMessage message) {
+        if (message == null
+                || message.protocol != 3
+                || !scope.equals(message.scope)
+                || message.kind == null
+                || message.revision < 0
+                || message.revision > MAX_EVENTS
+                || (message.target != 0 && message.target != localMemberId)) return;
+        if ("REQUEST".equals(message.kind)) {
+            handleSnapshotRequest(sender, message);
             return;
         }
-        if ("REPORT".equals(m.kind)) {
-            if (self == leader && synchronizedState() && Objects.equals(term, m.term) && m.report != null
-                    && m.report.valid() && m.report.getActor().equalsIgnoreCase(senderName)) acceptReport(sender, m.report);
+        if ("REPORT".equals(message.kind)) {
+            handleIncomingReport(sender, senderName, message);
             return;
         }
-        if ("TRANSFER_ACK".equals(m.kind)) {
-            if (self == leader && frozen && sender == transferTarget && Objects.equals(m.request, transferId)
-                    && Objects.equals(term, m.term) && m.revision == revision()) {
-                SupplyStateMessage commit = message("COMMIT", 0);
-                commit.successor = transferTarget; commit.nextTerm = nextTerm; commit.request = transferId;
-                redirect = commit;
-                snapshotOutbox.clear();
-                leader = transferTarget; term = nextTerm; transferTarget = 0; frozen = false; ready = false;
-                send(commit);
-            }
+        if ("TRANSFER_ACK".equals(message.kind)) {
+            handleHandoffAcknowledgement(sender, message);
             return;
         }
-        if (sender != leader) return;
-        if ("COMMIT".equals(m.kind)) {
-            if ((term != null && !Objects.equals(term, m.term)) || m.term == null || m.nextTerm == null || m.successor == 0 || m.successor == leader) return;
-            if (m.successor == self) {
-                if (transfer == null || !Objects.equals(transfer.id, m.request) || transfer.revision != m.revision
-                        || transfer.complete() == null || !install(transfer.complete())) return;
-                leader = self; term = m.nextTerm; ready = true; frozen = false; transfer = null; request = null;
-                lastContact = tick; send(message("HEARTBEAT", 0));
-            } else {
-                leader = m.successor; term = m.nextTerm; ready = false; frozen = false; request = null;
-                lastRequest = tick - 20; requestSnapshot();
-            }
+        if (sender != coordinatorMemberId) return;
+        if ("COMMIT".equals(message.kind)) {
+            handleHandoffCommit(message);
             return;
         }
-        if (term != null && !Objects.equals(term, m.term)) {
-            problem = "Paused: coordinator restarted; use a new session code"; ready = false; return;
-        }
-        if (m.term == null || m.term.length() > 100) return;
-        if ("HEARTBEAT".equals(m.kind) || "FROZEN".equals(m.kind)) {
-            if (term == null) term = m.term;
-            advertisedRevision = Math.max(advertisedRevision, m.revision);
-            lastContact = tick; frozen = "FROZEN".equals(m.kind);
-            if (m.revision != revision() || !ready) { ready = false; requestSnapshot(); }
+        if (term != null && !Objects.equals(term, message.term)) {
+            problem = "Paused: coordinator restarted; use a new session code";
+            ready = false;
             return;
         }
-        if ("TRANSFER".equals(m.kind)) {
-            if (!validChunk(m) || m.nextTerm == null) return;
-            if (term == null) term = m.term;
-            if (transfer == null || !Objects.equals(transfer.id, m.request)) transfer = new Assembly(m);
-            if (!transfer.add(m)) return;
-            if (transfer.complete() != null && validHistory(transfer.complete())) {
-                frozen = true;
-                SupplyStateMessage ack = message("TRANSFER_ACK", leader);
-                ack.request = m.request; ack.revision = m.revision; send(ack);
-            }
+        if (message.term == null || message.term.length() > 100) return;
+        if ("HEARTBEAT".equals(message.kind) || "FROZEN".equals(message.kind)) {
+            handleCoordinatorHeartbeat(message);
             return;
         }
-        if ("SNAPSHOT".equals(m.kind)) {
-            if (request == null || !request.equals(m.request) || !validChunk(m) || m.revision < revision()) return;
-            if (assembly == null) assembly = new Assembly(m);
-            if (!assembly.add(m)) return;
-            List<SupplyReport> all = assembly.complete();
-            if (all != null && install(all)) {
-                term = m.term; ready = revision() >= advertisedRevision; frozen = m.paused;
-                lastContact = tick; request = null; assembly = null;
-                problem = "";
-            }
+        if ("TRANSFER".equals(message.kind)) {
+            handleHandoffSnapshot(message);
             return;
         }
-        if (!Objects.equals(term, m.term)) return;
-        if ("REJECT".equals(m.kind)) {
-            if (m.report != null && pending.remove(m.report.getId()) != null) problem = "Report could not be reconciled";
+        if ("SNAPSHOT".equals(message.kind)) {
+            handleRecoverySnapshot(message);
             return;
         }
-        if ("UPDATE".equals(m.kind) && m.report != null && m.report.valid()) {
-            lastContact = tick;
-            advertisedRevision = Math.max(advertisedRevision, m.revision);
-            if (m.revision <= revision()) { if (accepted.containsKey(m.report.getId())) pending.remove(m.report.getId()); return; }
-            if (m.revision != revision() + 1 || !ready || !append(m.report)) { ready = false; requestSnapshot(); return; }
-            pending.remove(m.report.getId());
+        if (!Objects.equals(term, message.term)) return;
+        if ("REJECT".equals(message.kind)) {
+            handleRejectedReport(message);
+            return;
+        }
+        if ("UPDATE".equals(message.kind) && message.report != null && message.report.valid()) {
+            handleAcceptedUpdate(message);
+            return;
         }
     }
-    private boolean validChunk(SupplyStateMessage m) {
-        return m.request != null && m.request.length() <= 100 && m.revision >= 0 && m.revision <= MAX_EVENTS
-                && m.parts == Math.max(1, ((int) m.revision + CHUNK - 1) / CHUNK);
+
+    private void handleSnapshotRequest(long sender, SupplyStateMessage message) {
+        if (message.request == null || message.request.length() > 100) return;
+        if (localMemberId == coordinatorMemberId) sendSnapshot("SNAPSHOT", sender, message.request);
+        else if (redirect != null) send(redirect);
     }
-    private boolean dependenciesKnown(SupplyReport r) {
-        return r.isDrop() || accepted.keySet().containsAll(r.getDropIds());
+
+    private void handleIncomingReport(long sender, String senderName, SupplyStateMessage message) {
+        if (localMemberId == coordinatorMemberId
+                && synchronizedState()
+                && Objects.equals(term, message.term)
+                && message.report != null
+                && message.report.valid()
+                && message.report.getActor().equalsIgnoreCase(senderName))
+            acceptReport(sender, message.report);
     }
-    private void acceptReport(long sender, SupplyReport r) {
-        Integer index = accepted.get(r.getId());
+
+    // The old coordinator commits the handoff only after the successor has the complete history.
+    private void handleHandoffAcknowledgement(long sender, SupplyStateMessage message) {
+        if (localMemberId == coordinatorMemberId
+                && frozen
+                && sender == handoffTargetMemberId
+                && Objects.equals(message.request, handoffRequestId)
+                && Objects.equals(term, message.term)
+                && message.revision == revision()) {
+            SupplyStateMessage commit = createMessage("COMMIT", 0);
+            commit.successor = handoffTargetMemberId;
+            commit.nextTerm = nextTerm;
+            commit.request = handoffRequestId;
+            redirect = commit;
+            snapshotOutbox.clear();
+            coordinatorMemberId = handoffTargetMemberId;
+            term = nextTerm;
+            handoffTargetMemberId = 0;
+            frozen = false;
+            ready = false;
+            send(commit);
+        }
+    }
+
+    private void handleHandoffCommit(SupplyStateMessage message) {
+        if ((term != null && !Objects.equals(term, message.term))
+                || message.term == null
+                || message.nextTerm == null
+                || message.successor == 0
+                || message.successor == coordinatorMemberId) return;
+        if (message.successor == localMemberId) {
+            if (handoffSnapshot == null
+                    || !Objects.equals(handoffSnapshot.id, message.request)
+                    || handoffSnapshot.revision != message.revision
+                    || handoffSnapshot.complete() == null
+                    || !installSnapshot(handoffSnapshot.complete())) return;
+            coordinatorMemberId = localMemberId;
+            term = message.nextTerm;
+            ready = true;
+            frozen = false;
+            handoffSnapshot = null;
+            request = null;
+            lastCoordinatorContactTick = tick;
+            send(createMessage("HEARTBEAT", 0));
+        } else {
+            coordinatorMemberId = message.successor;
+            term = message.nextTerm;
+            ready = false;
+            frozen = false;
+            request = null;
+            lastSnapshotRequestTick = tick - SNAPSHOT_REQUEST_INTERVAL_TICKS;
+            requestSnapshot();
+        }
+    }
+
+    private void handleCoordinatorHeartbeat(SupplyStateMessage message) {
+        if (term == null) term = message.term;
+        latestCoordinatorRevision = Math.max(latestCoordinatorRevision, message.revision);
+        lastCoordinatorContactTick = tick;
+        frozen = "FROZEN".equals(message.kind);
+        if (message.revision != revision() || !ready) {
+            ready = false;
+            requestSnapshot();
+        }
+    }
+
+    private void handleHandoffSnapshot(SupplyStateMessage message) {
+        if (!isValidSnapshotChunk(message) || message.nextTerm == null) return;
+        if (term == null) term = message.term;
+        if (handoffSnapshot == null || !Objects.equals(handoffSnapshot.id, message.request))
+            handoffSnapshot = new SnapshotAssembly(message);
+        if (!handoffSnapshot.add(message)) return;
+        if (handoffSnapshot.complete() != null && isValidHistory(handoffSnapshot.complete())) {
+            frozen = true;
+            SupplyStateMessage ack = createMessage("TRANSFER_ACK", coordinatorMemberId);
+            ack.request = message.request;
+            ack.revision = message.revision;
+            send(ack);
+        }
+    }
+
+    private void handleRecoverySnapshot(SupplyStateMessage message) {
+        if (request == null
+                || !request.equals(message.request)
+                || !isValidSnapshotChunk(message)
+                || message.revision < revision()) return;
+        if (recoverySnapshot == null) recoverySnapshot = new SnapshotAssembly(message);
+        if (!recoverySnapshot.add(message)) return;
+        List<SupplyReport> all = recoverySnapshot.complete();
+        if (all != null && installSnapshot(all)) {
+            term = message.term;
+            ready = revision() >= latestCoordinatorRevision;
+            frozen = message.paused;
+            lastCoordinatorContactTick = tick;
+            request = null;
+            recoverySnapshot = null;
+            problem = "";
+        }
+    }
+
+    private void handleRejectedReport(SupplyStateMessage message) {
+        if (message.report != null && pending.remove(message.report.getId()) != null)
+            problem = "Report could not be reconciled";
+    }
+
+    // A revision gap means we need a snapshot; applying later events alone could lose a drop.
+    private void handleAcceptedUpdate(SupplyStateMessage message) {
+        lastCoordinatorContactTick = tick;
+        latestCoordinatorRevision = Math.max(latestCoordinatorRevision, message.revision);
+        if (message.revision <= revision()) {
+            if (acceptedEventIndexes.containsKey(message.report.getId()))
+                pending.remove(message.report.getId());
+            return;
+        }
+        if (message.revision != revision() + 1 || !ready || !appendAcceptedReport(message.report)) {
+            ready = false;
+            requestSnapshot();
+            return;
+        }
+        pending.remove(message.report.getId());
+    }
+
+    private boolean isValidSnapshotChunk(SupplyStateMessage message) {
+        return message.request != null
+                && message.request.length() <= 100
+                && message.revision >= 0
+                && message.revision <= MAX_EVENTS
+                && message.parts
+                        == Math.max(
+                                1,
+                                ((int) message.revision + SNAPSHOT_CHUNK_SIZE - 1)
+                                        / SNAPSHOT_CHUNK_SIZE);
+    }
+
+    private boolean hasReferencedDrops(SupplyReport report) {
+        return report.isDrop() || acceptedEventIndexes.keySet().containsAll(report.getDropIds());
+    }
+
+    private void acceptReport(long sender, SupplyReport report) {
+        Integer index = acceptedEventIndexes.get(report.getId());
         if (index != null) {
-            pending.remove(r.getId()); SupplyStateMessage m = message("UPDATE", sender);
-            m.report = history.get(index).copy(); m.revision = index + 1; if (sender != self) send(m); return;
-        }
-        if (!dependenciesKnown(r)) {
-            if (deferred.size() < 100) deferred.putIfAbsent(r.getId(), new Deferred(sender, r.copy(), tick));
-            else reject(sender, r);
+            pending.remove(report.getId());
+            SupplyStateMessage message = createMessage("UPDATE", sender);
+            message.report = history.get(index).copy();
+            message.revision = index + 1;
+            if (sender != localMemberId) send(message);
             return;
         }
-        if (history.size() >= MAX_EVENTS) { problem = "Paused: session history limit reached"; frozen = true; return; }
-        if (!append(r)) { reject(sender, r); return; }
-        pending.remove(r.getId()); SupplyStateMessage m = message("UPDATE", 0); m.report = r.copy(); send(m);
+        if (!hasReferencedDrops(report)) {
+            if (reportsWaitingForDrops.size() < MAX_DEFERRED_REPORTS)
+                reportsWaitingForDrops.putIfAbsent(
+                        report.getId(), new ReportWaitingForDrops(sender, report.copy(), tick));
+            else reject(sender, report);
+            return;
+        }
+        if (history.size() >= MAX_EVENTS) {
+            problem = "Paused: session history limit reached";
+            frozen = true;
+            return;
+        }
+        if (!appendAcceptedReport(report)) {
+            reject(sender, report);
+            return;
+        }
+        pending.remove(report.getId());
+        SupplyStateMessage message = createMessage("UPDATE", 0);
+        message.report = report.copy();
+        send(message);
     }
-    private void reject(long sender, SupplyReport r) {
-        if (sender == self) { pending.remove(r.getId()); problem = "Report could not be reconciled"; }
-        else { SupplyStateMessage m = message("REJECT", sender); m.report = r.copy(); send(m); }
+
+    private void reject(long sender, SupplyReport report) {
+        if (sender == localMemberId) {
+            pending.remove(report.getId());
+            problem = "Report could not be reconciled";
+        } else {
+            SupplyStateMessage message = createMessage("REJECT", sender);
+            message.report = report.copy();
+            send(message);
+        }
     }
-    private boolean append(SupplyReport r) {
-        if (!r.valid() || accepted.containsKey(r.getId()) || history.size() >= MAX_EVENTS) return false;
-        if (!r.isDrop()) {
+
+    // Check quantities before changing balances so two pickups cannot consume the same supply.
+    private boolean appendAcceptedReport(SupplyReport report) {
+        if (!report.valid()
+                || acceptedEventIndexes.containsKey(report.getId())
+                || history.size() >= MAX_EVENTS) return false;
+        if (!report.isDrop()) {
             int total = 0;
-            for (String id : new HashSet<>(r.getDropIds())) {
-                SupplyReport balance = balances.get(id);
-                if (balance != null && balance.getItemId() == r.getItemId() && balance.getTile().equals(r.getTile())) total += balance.getQuantity();
+            for (String id : new HashSet<>(report.getDropIds())) {
+                SupplyReport balance = remainingDrops.get(id);
+                if (balance != null
+                        && balance.getItemId() == report.getItemId()
+                        && balance.getTile().equals(report.getTile()))
+                    total += balance.getQuantity();
             }
-            if (total < r.getQuantity()) return false;
-            int remaining = r.getQuantity();
-            List<String> ids = new ArrayList<>(new TreeSet<>(r.getDropIds()));
+            if (total < report.getQuantity()) return false;
+            int remaining = report.getQuantity();
+            List<String> ids = new ArrayList<>(new TreeSet<>(report.getDropIds()));
             for (String id : ids) {
-                SupplyReport balance = balances.get(id);
-                if (balance == null || balance.getItemId() != r.getItemId() || !balance.getTile().equals(r.getTile())) continue;
-                int take = Math.min(remaining, balance.getQuantity()); balance.setQuantity(balance.getQuantity() - take); remaining -= take;
+                SupplyReport balance = remainingDrops.get(id);
+                if (balance == null
+                        || balance.getItemId() != report.getItemId()
+                        || !balance.getTile().equals(report.getTile())) continue;
+                int take = Math.min(remaining, balance.getQuantity());
+                balance.setQuantity(balance.getQuantity() - take);
+                remaining -= take;
             }
-        } else balances.put(r.getId(), r.copy());
-        accepted.put(r.getId(), history.size()); history.add(r.copy()); generation++;
+        } else remainingDrops.put(report.getId(), report.copy());
+        acceptedEventIndexes.put(report.getId(), history.size());
+        history.add(report.copy());
+        eventLog.add(new SupplyEventRecord(history.size(), report, "CONFIRMED", System.currentTimeMillis()));
+        generation++;
         return true;
     }
-    private boolean validHistory(List<SupplyReport> all) {
-        SharedSupplyState check = new SharedSupplyState(1, 1, scope, m -> {});
-        for (SupplyReport r : all) if (r == null || !check.dependenciesKnown(r) || !check.append(r)) return false;
+
+    private boolean isValidHistory(List<SupplyReport> all) {
+        SharedSupplyState check = new SharedSupplyState(1, 1, scope, message -> {});
+        for (SupplyReport report : all)
+            if (report == null
+                    || !check.hasReferencedDrops(report)
+                    || !check.appendAcceptedReport(report)) return false;
         return true;
     }
-    private boolean install(List<SupplyReport> all) {
-        if (!validHistory(all)) return false;
-        history.clear(); accepted.clear(); balances.clear();
-        for (SupplyReport r : all) append(r);
-        pending.keySet().removeAll(accepted.keySet()); generation++;
+
+    // Validate the entire snapshot before replacing anything visible to the rest of the plugin.
+    private boolean installSnapshot(List<SupplyReport> all) {
+        if (!isValidHistory(all)) return false;
+        history.clear();
+        eventLog.clear();
+        acceptedEventIndexes.clear();
+        remainingDrops.clear();
+        for (SupplyReport report : all) appendAcceptedReport(report);
+        pending.keySet().removeAll(acceptedEventIndexes.keySet());
+        generation++;
         return true;
     }
 }

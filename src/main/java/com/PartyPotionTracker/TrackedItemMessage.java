@@ -1,8 +1,9 @@
 package com.PartyPotionTracker;
 
 import lombok.Getter;
-import lombok.Setter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import net.runelite.api.coords.WorldPoint;
 
 @Getter

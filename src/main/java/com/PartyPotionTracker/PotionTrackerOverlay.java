@@ -1,4 +1,5 @@
 package com.PartyPotionTracker;
+
 import net.runelite.api.*;
 import net.runelite.api.Point;
 import net.runelite.api.coords.LocalPoint;
@@ -6,8 +7,10 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import javax.inject.Inject;
+
 import java.awt.*;
+
+import javax.inject.Inject;
 
 public class PotionTrackerOverlay extends Overlay {
     private final Client client;
@@ -24,20 +27,28 @@ public class PotionTrackerOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        if (plugin.isInsideRaid() && plugin.hasFreshSharedState() && plugin.getConfig().usePotionHighlight() && plugin.getPickupManager() != null) {
+        if (plugin.isInsideRaid()
+                && plugin.hasFreshSharedState()
+                && plugin.getConfig().usePotionHighlight()
+                && plugin.getPickupManager() != null) {
             for (TrackedItem trackedItem : plugin.getPickupManager().getMyDroppedItems()) {
                 if (!plugin.getPickupManager().isVisible(trackedItem)) continue;
                 WorldPoint worldPoint = trackedItem.getWorldPoint();
                 if (worldPoint == null) continue;
 
                 // Convert WorldPoint to LocalPoint
-                LocalPoint localPoint = LocalPoint.fromWorld(client.getTopLevelWorldView(), worldPoint);
+                LocalPoint localPoint =
+                        LocalPoint.fromWorld(client.getTopLevelWorldView(), worldPoint);
                 if (localPoint == null) continue;
 
                 // OPTIONAL: Draw a small dot in center using text location trick
-                Point canvasPoint = Perspective.getCanvasTextLocation(client, graphics, localPoint, ".", 0);
+                Point canvasPoint =
+                        Perspective.getCanvasTextLocation(client, graphics, localPoint, ".", 0);
                 if (canvasPoint != null) {
-                    Color potionColor = plugin.getPickupManager().isOwnershipUncertain(trackedItem) ? Color.GRAY : plugin.getColorForPartyMember(trackedItem.getOwnerName());
+                    Color potionColor =
+                            plugin.getPickupManager().isOwnershipUncertain(trackedItem)
+                                    ? Color.GRAY
+                                    : plugin.getColorForPartyMember(trackedItem.getOwnerName());
                     graphics.setColor(potionColor);
                     graphics.fillOval(canvasPoint.getX() - 3, canvasPoint.getY() - 3, 6, 6);
                 }

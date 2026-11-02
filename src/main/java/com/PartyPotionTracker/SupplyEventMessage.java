@@ -2,6 +2,7 @@ package com.PartyPotionTracker;
 
 import lombok.Getter;
 import lombok.Setter;
+
 import net.runelite.client.party.messages.PartyMemberMessage;
 
 /** Versioned envelope. Missing fields from older plugin versions fail validation. */

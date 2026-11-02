@@ -1,6 +1,6 @@
 # Party Potion Tracker
 
-A RuneLite-only raid supply tracker with one explicitly selected coordinator.
+A RuneLite-only raid supply tracker with automatic initial coordinator selection.
 It uses RuneLite's existing Party messages; there is no custom backend or additional
 HTTP API. This is a development build requiring live multi-client validation.
 
@@ -20,13 +20,16 @@ separate client; it does not publish anything to the Plugin Hub.
 ## Set up the group
 
 1. Everyone runs this version, enables RuneLite **Party**, and joins the same party/world.
-2. In Party Potion Tracker settings, everyone enters the same **Coordinator name**
-   (that player's in-game display name).
-3. Everyone enters the same fresh **Raid session code**, for example `sunday-run-1`.
+2. Leave **Automatic coordinator** enabled (the default). No coordinator name is needed.
+3. Automatic coordination uses the raid's in-game roster. A session code is only a fallback for
+   raids or clients that do not expose the roster yet.
    Use a different code for every raid run. The group must actually be in the same
    instance; the code establishes agreement, not automatic game-instance detection.
-4. Enter the raid. The coordinator initializes the shared record. Other clients
-   request a snapshot. The status panel shows coordinator/synchronized, revision,
+4. Enter the raid. Compatible participants announce themselves and compare their
+   discovered rosters. After a stable discovery/agreement window (normally about
+   13–18 seconds), the lowest member ID in that initial group becomes coordinator.
+   A late joiner follows the already established coordinator, even with a lower ID.
+   Other clients request a snapshot. The status panel shows coordinator/synchronized, revision,
    and pending-report count. Ground highlights are suppressed while syncing or stale.
 
 Tracking runs only inside Chambers of Xeric, Theatre of Blood, Tombs of Amascut,
@@ -65,7 +68,8 @@ terms determine ordering; local game ticks drive timeouts and retries.
 An unavailable coordinator causes replicas to pause after 20 local game ticks
 (about 12 seconds). Their last shared record remains in memory. Reports remain
 pending, within the limits below, and retry after the same authority is synchronized.
-No client elects itself automatically.
+Automatic election only bootstraps a new session; it does not replace a missing
+coordinator or discard its history. Inventory sharing continues independently.
 
 For a graceful transfer, the **current coordinator** types in RuneLite chat:
 
@@ -75,28 +79,34 @@ For a graceful transfer, the **current coordinator** types in RuneLite chat:
 
 The old coordinator freezes updates, sends a complete history to that party member,
 and waits for acknowledgement before committing a new leadership term. The target
-must be running this version with the same session code and the current coordinator
-selected. Existing synchronized peers follow the committed transfer.
+must be running this version in the same session and have a recent presence report.
+Existing synchronized peers follow the committed transfer.
 
 Use `::ppt cancel` on the old coordinator to cancel a transfer **before commitment**.
-Use `::ppt` to print the current status. After successful handoff, everyone should
-change **Coordinator name** to the new coordinator, particularly before restarting
-or inviting late joiners. Changing the setting alone does not promote a replica.
+Use `::ppt` to print the current status. Automatic mode advertises the successor for
+late joiners; no name change is needed. If using the optional manual mode, update
+**Manual coordinator name** after handoff. Changing that setting alone does not promote a replica.
 Keep the old coordinator connected until all peers confirm synchronization; it can
 redirect clients that missed the commit.
 
 If the coordinator process is lost before a safe transfer, do not silently promote
-an arbitrary cache. Choose a new coordinator and a **fresh session code** to start
-an explicitly empty record. Drops from before that reset cannot be reconstructed.
-Recent coordinator session fingerprints are persisted to prevent accidentally
-starting an empty authority with the same code after restarting. They contain no
+an arbitrary cache. Choose a **fresh session code** to elect a coordinator for an
+explicitly empty record. Drops from before that reset cannot be reconstructed.
+Recent session fingerprints are persisted by automatic-mode participants to prevent
+accidentally starting an empty authority with the same code after restarting. They contain no
 raw party ID or session code; the actual shared history remains in memory only.
 
 ## Boundaries and limitations
 
 - Every contributing player needs this version. Older v2 messages are not registered.
-- Members must agree on the coordinator and session code. This is explicit authority,
-  not a consensus protocol tolerating malicious or differently configured peers.
+- Members must use the same coordination mode and session code. Discovery only considers
+  compatible, same-scope plugin presence; party members without the plugin are not candidates.
+- Automatic discovery is not partition-safe consensus: isolated groups can independently
+  bootstrap before hearing each other. Conflicting coordinator claims pause tracking when
+  discovered; histories are never silently merged. A fresh code is required to recover.
+  Do not treat this development build as a guarantee against split-brain during initial discovery.
+- Switching coordination modes during an active run pauses tracking. Restore the original
+  mode or use a new session code. Manual mode remains available for explicitly chosen authority.
 - A snapshot recovers the coordinator's reported history, not actions nobody observed.
   A pickup without known drop references cannot be attributed reliably.
 - Identical bottles from different owners cannot be uniquely identified by the game.
@@ -119,7 +129,8 @@ See [STATE_DESIGN.md](STATE_DESIGN.md) for invariants and failure handling.
 `bash gradlew test jar shadowJar` runs local correlation tests, raid gating tests,
 protocol serialization tests, and an in-memory multi-client network simulation.
 The simulation covers duplicate/reordered reports, missing revisions, partial snapshots,
-late joins, coordinator loss/restart, concurrent pickups and interrupted handoffs.
+late joins, coordinator loss/restart, concurrent pickups and interrupted handoffs. Election simulations cover simultaneous arrivals, members without
+plugins, late joins, stale/replayed presence, incompatible scopes, partition conflicts and restart guards.
 It is not a substitute for two or more actual RuneLite clients.
 
 In-game checklist: configure two clients; confirm matching revision numbers; drop
@@ -130,3 +141,18 @@ then stop the coordinator and confirm the others visibly pause without deleting 
 Region references: [ToB](https://github.com/HarrySJ96/theatreofbloodstats/blob/master/src/main/java/hsj/external/theatreofbloodstats/TobConstants.java),
 [ToA](https://github.com/LlemonDuck/tombs-of-amascut/blob/master/src/main/java/com/duckblade/osrs/toa/util/RaidRoom.java),
 [Archive](https://github.com/LlemonDuck/the-fractured-archive/blob/master/src/main/java/com/duckblade/osrs/tfa/util/RaidRoom.java).
+
+
+### Carried supply panel
+
+Open **Raid supplies** in the RuneLite sidebar to see brew, super restore, and prayer potion doses for each reporting player, plus current team totals. Hover a player for their bottle breakdown. Raid variants and other drinkable potions are listed separately by name, without converting them into standard potion equivalents. Ground supplies are excluded from inventory totals.
+
+All participants must currently join the same RuneLite party and be in the same world and raid.
+For ToA, ToB, and TFA, automatic mode builds the boundary from the game's actual raid names and
+controller, so separate teams do not merge just because someone typed the same code. The session
+code remains a compatibility fallback where the game does not expose a roster (including some
+Chambers states).
+
+Inventories are broadcast approximately every five game ticks. Reports become stale after 15 seconds without a newer snapshot, and stale reports are excluded from totals. Party members without a report show **Unknown**; this can mean they are not sharing, are outside this raid, or have not synchronized yet. It does not mean they have zero supplies. Departed members are removed from the inventory table.
+
+The optional **Show carried supply totals** setting displays the same totals on screen. These totals cover current reporting participants, not necessarily every raider. Inventory data is carried through RuneLite Party messaging with no custom backend. Live multi-client testing is still required.
