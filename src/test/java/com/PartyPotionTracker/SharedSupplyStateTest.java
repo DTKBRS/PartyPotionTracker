@@ -100,6 +100,28 @@ public class SharedSupplyStateTest {
         assertFalse(replica.synchronizedState()); assertEquals(1, replica.leader()); assertEquals(1, replica.revision());
         replica.submit(drop("b", 2)); assertEquals(1, replica.revision()); assertEquals(1, replica.pendingCount());
     }
+
+    @Test public void replacementCoordinatorKeepsHistoryAndFollowersRecover() {
+        Network n = new Network();
+        SharedSupplyState old = n.add(1), replacement = n.add(2), follower = n.add(3);
+        n.connect();
+        old.submit(drop("a", 1)); n.drain();
+
+        replacement.promoteToCoordinator();
+        n.drain();
+        follower.reassignCoordinator(2);
+        follower.tick();
+        n.drain();
+        replacement.tick();
+        n.drain();
+
+        assertEquals(2, replacement.leader());
+        assertTrue(replacement.synchronizedState());
+        assertEquals(2, follower.leader());
+        assertTrue(follower.synchronizedState());
+        assertEquals(1, follower.revision());
+        assertEquals("a", follower.history().get(0).getId());
+    }
     @Test public void restartedCoordinatorCannotSilentlyReplaceExistingTerm() {
         Network n = new Network(); n.add(1); SharedSupplyState replica = n.add(2); n.connect();
         String term = replica.term(); n.add(1); for (int i = 0; i < 10; i++) n.tick();

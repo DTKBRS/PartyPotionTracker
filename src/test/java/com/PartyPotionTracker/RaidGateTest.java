@@ -275,7 +275,7 @@ public class RaidGateTest {
     }
 
     @Test
-    public void joinsAdvertisedCoordinatorAndPausesWhenPluginHeartbeatExpires() throws Exception {
+    public void joinsAdvertisedCoordinatorAndPromotesReplacementWhenHeartbeatExpires() throws Exception {
         setupAutomaticParty();
         net.runelite.client.party.PartyMember coordinator =
                 mock(net.runelite.client.party.PartyMember.class);
@@ -320,9 +320,9 @@ public class RaidGateTest {
         snapshot.history = java.util.Collections.emptyList();
         plugin.onSupplyStateMessage(snapshot);
         assertTrue(plugin.hasFreshSharedState());
-        for (int i = 0; i < 30; i++) plugin.onGameTick(new GameTick());
-        assertFalse(plugin.hasFreshSharedState());
-        assertEquals("Waiting for party supplies", plugin.trackingStatus());
+        for (int i = 0; i < 60; i++) plugin.onGameTick(new GameTick());
+        assertTrue(plugin.hasFreshSharedState());
+        assertEquals("Party supplies are up to date", plugin.trackingStatus());
     }
 
     @Test

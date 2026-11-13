@@ -46,6 +46,7 @@ final class SharedSupplyState {
     private boolean frozen;
     private String request;
     private SnapshotAssembly recoverySnapshot;
+    private boolean allowLowerRevisionSnapshot;
     private SnapshotAssembly handoffSnapshot;
     private long handoffTargetMemberId;
     private String handoffRequestId;
@@ -253,6 +254,48 @@ final class SharedSupplyState {
 
     void disconnected() {
         lastCoordinatorContactTick = tick - COORDINATOR_TIMEOUT_TICKS - 1;
+    }
+
+    /** Promote this replica after the election has selected it as the replacement coordinator. */
+    void promoteToCoordinator() {
+        coordinatorMemberId = localMemberId;
+        term = UUID.randomUUID().toString();
+        ready = true;
+        frozen = false;
+        redirect = null;
+        handoffTargetMemberId = 0;
+        handoffRequestId = null;
+        nextTerm = null;
+        request = null;
+        recoverySnapshot = null;
+        handoffSnapshot = null;
+        allowLowerRevisionSnapshot = false;
+        latestCoordinatorRevision = revision();
+        lastCoordinatorContactTick = tick;
+        problem = "";
+        generation++;
+        send(createMessage("HEARTBEAT", 0));
+    }
+
+    /** Point a replica at a replacement coordinator and request its authoritative history. */
+    void reassignCoordinator(long replacement) {
+        if (replacement <= 0 || replacement == localMemberId) return;
+        coordinatorMemberId = replacement;
+        term = null;
+        ready = false;
+        frozen = false;
+        redirect = null;
+        handoffTargetMemberId = 0;
+        handoffRequestId = null;
+        nextTerm = null;
+        request = null;
+        recoverySnapshot = null;
+        handoffSnapshot = null;
+        allowLowerRevisionSnapshot = true;
+        lastCoordinatorContactTick = tick - COORDINATOR_TIMEOUT_TICKS - 1;
+        lastSnapshotRequestTick = tick - SNAPSHOT_REQUEST_INTERVAL_TICKS;
+        problem = "";
+        generation++;
     }
 
     void transportFailed() {
@@ -477,7 +520,7 @@ final class SharedSupplyState {
         if (request == null
                 || !request.equals(message.request)
                 || !isValidSnapshotChunk(message)
-                || message.revision < revision()) return;
+                || (message.revision < revision() && !allowLowerRevisionSnapshot)) return;
         if (recoverySnapshot == null) recoverySnapshot = new SnapshotAssembly(message);
         if (!recoverySnapshot.add(message)) return;
         List<SupplyReport> all = recoverySnapshot.complete();
@@ -488,6 +531,7 @@ final class SharedSupplyState {
             lastCoordinatorContactTick = tick;
             request = null;
             recoverySnapshot = null;
+            allowLowerRevisionSnapshot = false;
             problem = "";
         }
     }

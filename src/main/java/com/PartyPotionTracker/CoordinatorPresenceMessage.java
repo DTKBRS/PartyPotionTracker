@@ -12,4 +12,7 @@ public class CoordinatorPresenceMessage extends PartyMemberMessage {
     public String proposal;
     public long coordinator;
     public boolean previouslyParticipated;
+    // A replacement election is authoritative for the coordinator that stopped reporting.
+    public boolean failover;
+    public long retiredCoordinator;
 }

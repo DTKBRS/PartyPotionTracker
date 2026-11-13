@@ -91,7 +91,7 @@ public class CoordinatorElectionTest {
     }
 
     @Test
-    public void lostCoordinatorNeverTriggersEmptyReplacement() {
+    public void lostCoordinatorTriggersReplacementFromSurvivingRaidMembers() {
         Network network = new Network();
         network.add(1, false);
         CoordinatorElection follower = network.add(2, false);
@@ -99,9 +99,49 @@ public class CoordinatorElectionTest {
         network.nodes.remove(1L);
         network.party.remove(1L);
         network.advance(80);
-        assertEquals(1, follower.coordinator());
+        assertEquals(2, follower.coordinator());
         assertFalse(follower.eligible(1));
-        assertTrue(follower.status().contains("unavailable"));
+        assertEquals("Coordinator selected", follower.status());
+    }
+
+    @Test
+    public void returnedCoordinatorAcceptsTheReplacementAuthority() {
+        CoordinatorElection oldCoordinator =
+                new CoordinatorElection(1, SCOPE, false, message -> {});
+        oldCoordinator.tick(Set.of(1L, 2L));
+        CoordinatorPresenceMessage replacement = presence(2, 2);
+        replacement.failover = true;
+        replacement.retiredCoordinator = 1;
+        oldCoordinator.receive(2, replacement);
+        assertEquals(2, oldCoordinator.coordinator());
+        assertFalse(oldCoordinator.blocked());
+    }
+
+    @Test
+    public void failoverCanReplaceAPreviouslyUsedSession() {
+        CoordinatorElection follower = new CoordinatorElection(2, SCOPE, true, message -> {});
+        follower.tick(Set.of(1L, 2L));
+        follower.receive(1, presence(1, 1));
+        assertEquals(1, follower.coordinator());
+        for (int i = 0; i < 80; i++) follower.tick(Set.of(2L));
+        assertEquals(2, follower.coordinator());
+        assertFalse(follower.blocked());
+    }
+
+    @Test
+    public void survivingMembersChooseTheSameReplacement() {
+        Network network = new Network();
+        network.add(1, false);
+        CoordinatorElection second = network.add(2, false);
+        CoordinatorElection third = network.add(3, false);
+        network.advance(40);
+        network.nodes.remove(1L);
+        network.party.remove(1L);
+        network.advance(40);
+        assertEquals(2, second.coordinator());
+        assertEquals(2, third.coordinator());
+        assertFalse(second.blocked());
+        assertFalse(third.blocked());
     }
 
     @Test

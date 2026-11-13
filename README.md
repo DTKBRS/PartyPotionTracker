@@ -55,41 +55,27 @@ still require in-game verification.
 - Local visibility, scene reloads, and render range do not delete shared history.
   They only affect local highlights and uncertainty. Thus expired/unobserved piles
   can remain in the historical record; it is not a guarantee of physical availability.
-- Mixed-owner piles use gray highlights and uncertain-owner pickup messages. No
+- Mixed-owner piles use gray highlights and uncertain-owner pickup records in the panel. No
   unexplained disappearance accuses another player of taking an item.
 
 No wall-clock synchronization is needed for this protocol. Revisions and leadership
 terms determine ordering; local game ticks drive timeouts and retries.
 
-## Coordinator loss and handoff
+## Coordinator loss
 
 An unavailable coordinator causes replicas to pause after 20 local game ticks
-(about 12 seconds). Their last shared record remains in memory. Reports remain
-pending, within the limits below, and retry after the same authority is synchronized.
-Automatic election only bootstraps a new session; it does not replace a missing
-coordinator or discard its history. Inventory sharing continues independently.
+(about 12 seconds). Their last shared record remains in memory while the surviving
+raid members automatically elect the lowest eligible replacement. The replacement
+keeps its validated local history and announces a new coordinator term; followers
+request a snapshot if their histories differ. Reports remain pending, within the
+limits below, and retry after the replacement is synchronized.
 
-For a graceful transfer, the **current coordinator** types in RuneLite chat:
+There are no in-game chat commands. The panel is the user-facing status surface, and
+automatic coordination advertises the selected coordinator to late joiners.
 
-```text
-::ppt handoff Player Name
-```
-
-The old coordinator freezes updates, sends a complete history to that party member,
-and waits for acknowledgement before committing a new leadership term. The target
-must be running this version in the same session and have a recent presence report.
-Existing synchronized peers follow the committed transfer.
-
-Use `::ppt cancel` on the old coordinator to cancel a transfer **before commitment**.
-Use `::ppt` to print the current status. Automatic coordination advertises the successor for
-late joiners; no name or code change is needed.
-Keep the old coordinator connected until all peers confirm synchronization; it can
-redirect clients that missed the commit.
-
-If the coordinator process is lost before a safe transfer, do not silently promote
- an arbitrary cache. The raid roster and controller create a new identity for each supported raid
- instance. Drops from before a lost session cannot be reconstructed; the actual shared history
- remains in memory only.
+If the coordinator process is lost, the replacement election uses the surviving raid
+roster and never creates a new empty session. A split roster can still produce
+conflicting claims; those clients pause instead of merging histories.
 
 ## Boundaries and limitations
 
@@ -109,8 +95,7 @@ If the coordinator process is lost before a safe transfer, do not silently promo
   The record retains that uncertainty; separate tiles are best for exact attribution.
 - Room loading preserves history. Leaving raid interiors for three logged-in ticks,
   changing world/party, logging out or disabling the plugin resets local tracking.
-  A replica can subsequently request the coordinator's snapshot; a lost coordinator
-  needs the recovery procedure above.
+  A replica can subsequently request the current coordinator's snapshot after a failover.
 - First-version bounds: 500 accepted reports per raid, 100 local
   reports, 100 deferred dependency reports, and 100 referenced drop IDs per pickup.
   The history limit freezes the authority rather than forgetting deduplication IDs.
@@ -131,8 +116,8 @@ It is not a substitute for two or more actual RuneLite clients.
 
 In-game checklist: configure two clients; confirm matching revision numbers; drop
 and pick up supplies; walk out of range and return; cross room-loading boundaries;
-join late; briefly interrupt a follower connection; perform and cancel handoffs;
-then stop the coordinator and confirm the others visibly pause without deleting history.
+join late; briefly interrupt a follower connection;
+then stop the coordinator and confirm the others elect a replacement without deleting history.
 
 Region references: [ToB](https://github.com/HarrySJ96/theatreofbloodstats/blob/master/src/main/java/hsj/external/theatreofbloodstats/TobConstants.java),
 [ToA](https://github.com/LlemonDuck/tombs-of-amascut/blob/master/src/main/java/com/duckblade/osrs/toa/util/RaidRoom.java),

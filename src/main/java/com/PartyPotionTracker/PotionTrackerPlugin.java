@@ -552,12 +552,12 @@ public class PotionTrackerPlugin extends Plugin {
             for (SupplyReport report : reportsAwaitingElection) shared.submit(report);
             reportsAwaitingElection.clear();
         } else if (shared.leader() != coordinator) {
-            selectionBlocked = true;
-            stateStatus = "Paused: waiting for coordinator handoff confirmation";
-        } else {
-            for (SupplyReport report : reportsAwaitingElection) shared.submit(report);
-            reportsAwaitingElection.clear();
+            if (coordinator == selfMemberId) shared.promoteToCoordinator();
+            else shared.reassignCoordinator(coordinator);
+            projectedGeneration = -1;
         }
+        for (SupplyReport report : reportsAwaitingElection) shared.submit(report);
+        reportsAwaitingElection.clear();
     }
 
     private void sendPresence(CoordinatorPresenceMessage message) {
