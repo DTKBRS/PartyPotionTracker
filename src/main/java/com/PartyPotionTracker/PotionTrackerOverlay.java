@@ -26,7 +26,6 @@ import java.awt.Stroke;
 public class PotionTrackerOverlay extends Overlay
 {
     private static final Color UNKNOWN_COLOR = Color.LIGHT_GRAY;
-    private static final int FILL_ALPHA = 55;
     private static final int OUTLINE_ALPHA = 220;
 
     private final Client client;
@@ -203,9 +202,6 @@ public class PotionTrackerOverlay extends Overlay
             case ITEM_OUTLINE:
                 drawItemOutline(graphics, tile, item, localPoint, color);
                 break;
-            case CIRCLE:
-                drawCircle(graphics, localPoint, color);
-                break;
             case DOT:
                 drawDot(graphics, localPoint, color);
                 break;
@@ -236,9 +232,8 @@ public class PotionTrackerOverlay extends Overlay
             return;
         }
 
-        // Some scene rebuilds expose the ground item before its item layer is
-        // available. Keep the potion visibly marked during that short window.
-        drawCircle(graphics, localPoint, color);
+        // The model layer can be absent during a scene rebuild. There is no
+        // tile-fill fallback because tile highlighting is intentionally removed.
     }
 
     private void drawCornerMarkers(Graphics2D graphics, LocalPoint localPoint, Color color)
@@ -272,22 +267,6 @@ public class PotionTrackerOverlay extends Overlay
         int x = startX + (endX - startX) / cornerLength;
         int y = startY + (endY - startY) / cornerLength;
         graphics.drawLine(startX, startY, x, y);
-    }
-
-    private void drawCircle(Graphics2D graphics, LocalPoint localPoint, Color color)
-    {
-        Point canvasPoint = Perspective.localToCanvas(client, localPoint, 0);
-        if (canvasPoint == null)
-        {
-            return;
-        }
-
-        int radius = 8;
-        graphics.setColor(withAlpha(color, FILL_ALPHA));
-        graphics.fillOval(canvasPoint.getX() - radius, canvasPoint.getY() - radius, radius * 2, radius * 2);
-        graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
-        graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
-        graphics.drawOval(canvasPoint.getX() - radius, canvasPoint.getY() - radius, radius * 2, radius * 2);
     }
 
     private void drawDot(Graphics2D graphics, LocalPoint localPoint, Color color)

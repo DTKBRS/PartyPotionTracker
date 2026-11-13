@@ -97,7 +97,9 @@ public class PotionTrackerPlugin extends Plugin
 	private void migrateRemovedHighlightStyles()
 	{
 		String savedStyle = configManager.getConfiguration("PotionTrackerConfig", "highlightStyle");
-		if ("TILE_OUTLINE".equals(savedStyle) || "TILE_FILL".equals(savedStyle))
+		if ("TILE_OUTLINE".equals(savedStyle)
+				|| "TILE_FILL".equals(savedStyle)
+				|| "CIRCLE".equals(savedStyle))
 		{
 			configManager.setConfiguration(
 					"PotionTrackerConfig",
