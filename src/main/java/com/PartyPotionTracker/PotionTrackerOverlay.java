@@ -9,10 +9,10 @@ import net.runelite.api.TileItem;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 
 import javax.inject.Inject;
 import java.awt.BasicStroke;
@@ -22,7 +22,6 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Stroke;
-import java.awt.image.BufferedImage;
 
 public class PotionTrackerOverlay extends Overlay
 {
@@ -32,14 +31,14 @@ public class PotionTrackerOverlay extends Overlay
 
     private final Client client;
     private final PotionTrackerPlugin plugin;
-    private final ItemManager itemManager;
+    private final ModelOutlineRenderer modelOutlineRenderer;
 
     @Inject
-    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin, ItemManager itemManager)
+    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin, ModelOutlineRenderer modelOutlineRenderer)
     {
         this.client = client;
         this.plugin = plugin;
-        this.itemManager = itemManager;
+        this.modelOutlineRenderer = modelOutlineRenderer;
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
     }
@@ -130,7 +129,7 @@ public class PotionTrackerOverlay extends Overlay
             }
 
             Color color = getColor(kind, trackedItem);
-            drawHighlight(graphics, tile.getLocalLocation(), item, color);
+            drawHighlight(graphics, tile, tile.getLocalLocation(), item, color);
         }
     }
 
@@ -191,13 +190,18 @@ public class PotionTrackerOverlay extends Overlay
         return UNKNOWN_COLOR;
     }
 
-    private void drawHighlight(Graphics2D graphics, LocalPoint localPoint, TileItem item, Color color)
+    private void drawHighlight(
+            Graphics2D graphics,
+            Tile tile,
+            LocalPoint localPoint,
+            TileItem item,
+            Color color)
     {
         PotionTrackerConfig.HighlightStyle style = plugin.getConfig().highlightStyle();
         switch (style)
         {
             case ITEM_OUTLINE:
-                drawItemOutline(graphics, localPoint, item, color);
+                drawItemOutline(graphics, tile, item, localPoint, color);
                 break;
             case CIRCLE:
                 drawCircle(graphics, localPoint, color);
@@ -209,26 +213,32 @@ public class PotionTrackerOverlay extends Overlay
                 drawCornerMarkers(graphics, localPoint, color);
                 break;
             default:
-                drawItemOutline(graphics, localPoint, item, color);
+                drawItemOutline(graphics, tile, item, localPoint, color);
                 break;
         }
     }
 
-    private void drawItemOutline(Graphics2D graphics, LocalPoint localPoint, TileItem item, Color color)
+    private void drawItemOutline(
+            Graphics2D graphics,
+            Tile tile,
+            TileItem item,
+            LocalPoint localPoint,
+            Color color)
     {
-        BufferedImage outline = itemManager.getItemOutline(item.getId(), item.getQuantity(), color);
-        if (outline == null || outline.getWidth() == 0 || outline.getHeight() == 0)
+        if (tile.getItemLayer() != null && item != null)
         {
+            modelOutlineRenderer.drawOutline(
+                    tile.getItemLayer(),
+                    item,
+                    plugin.getConfig().outlineWidth(),
+                    color,
+                    4);
             return;
         }
 
-        Point canvasPoint = Perspective.getCanvasImageLocation(client, localPoint, outline, 0);
-        if (canvasPoint == null)
-        {
-            return;
-        }
-
-        graphics.drawImage(outline, canvasPoint.getX(), canvasPoint.getY(), null);
+        // Some scene rebuilds expose the ground item before its item layer is
+        // available. Keep the potion visibly marked during that short window.
+        drawCircle(graphics, localPoint, color);
     }
 
     private void drawCornerMarkers(Graphics2D graphics, LocalPoint localPoint, Color color)

@@ -65,7 +65,7 @@ public interface PotionTrackerConfig extends Config{
     @ConfigItem(
             keyName = "outlineWidth",
             name = "Outline width",
-            description = "Width of circle and corner marker outlines",
+            description = "Width of the potion model outline and geometric markers",
             section = HIGHLIGHT_SECTION,
             position = 5
     )
