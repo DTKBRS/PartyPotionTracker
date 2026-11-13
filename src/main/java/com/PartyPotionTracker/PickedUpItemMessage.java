@@ -1,25 +1,18 @@
 package com.PartyPotionTracker;
 
-import lombok.Getter;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
-
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.party.messages.PartyMemberMessage;
 
-@Getter
-@Setter
+@EqualsAndHashCode(callSuper = false)
+@Data
 @NoArgsConstructor
-public class PickedUpItemMessage extends SupplyEventMessage {
+@AllArgsConstructor
+public class PickedUpItemMessage extends PartyMemberMessage {
     private int itemId;
     private WorldPoint worldPoint;
     private String pickerName;
-    private java.util.List<String> dropIds;
-
-    public PickedUpItemMessage(int itemId, WorldPoint worldPoint, String name) {
-        this.itemId = itemId;
-        this.worldPoint = worldPoint;
-        this.pickerName = name;
-        setEventId(java.util.UUID.randomUUID().toString());
-        setQuantity(1);
-    }
 }
