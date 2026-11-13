@@ -66,7 +66,6 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Getter
 	private PickupManager pickupManager;
-	@Getter(AccessLevel.PACKAGE)
 	private DropManager dropManager;
 
 	private boolean inRaid = false;
@@ -106,7 +105,6 @@ public class PotionTrackerPlugin extends Plugin
 
 		// Clean up
 		overlayManager.remove(overlay);
-		dropManager.clear();
 		wsClient.unregisterMessage(PickedUpItemMessage.class);
 		wsClient.unregisterMessage(TrackedItemMessage.class);
 	}
@@ -124,7 +122,6 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
 		if (inRaid){
-			dropManager.menuOptionClicked(event);
 			pickupManager.menuOptionClicked(event);
 		}
 	}
@@ -149,7 +146,6 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged gameState) {
 		if (gameState.getGameState().equals(GameState.LOADING)){
-			dropManager.clear();
 			pickupManager.clear();
 		}
 	}
@@ -158,7 +154,6 @@ public class PotionTrackerPlugin extends Plugin
 	public void onGameTick(GameTick tick) {
 		if (client.getLocalPlayer() == null) {
 			if (inRaid) {
-				dropManager.clear();
 				pickupManager.clear();
 			}
 			inRaid = false;
@@ -166,50 +161,18 @@ public class PotionTrackerPlugin extends Plugin
 		}
 
 		LocalPoint lp = client.getLocalPlayer().getLocalLocation();
-		RaidRegion currentRegion = findRaidRegion(lp);
+		int regionId = lp == null ? -1 : WorldPoint.fromLocalInstance(client, lp).getRegionID();
+		RaidRegion currentRegion = RaidRegion.fromRegionId(regionId);
 		boolean wasInRaid = inRaid;
 		inRaid = currentRegion != null;
 
 		if (wasInRaid && !inRaid) {
-			dropManager.clear();
 			pickupManager.clear();
 		}
 
 		if (inRaid){
-			dropManager.gameTick();
 			pickupManager.gameTick();
 		}
-	}
-
-	private RaidRegion findRaidRegion(LocalPoint localPoint)
-	{
-		if (localPoint != null)
-		{
-			WorldPoint mappedPoint = WorldPoint.fromLocalInstance(client, localPoint);
-			if (mappedPoint != null)
-			{
-				RaidRegion region = RaidRegion.fromRegionId(mappedPoint.getRegionID());
-				if (region != null)
-				{
-					return region;
-				}
-			}
-		}
-
-		WorldView worldView = client.getTopLevelWorldView();
-		if (worldView != null && worldView.getMapRegions() != null)
-		{
-			for (int regionId : worldView.getMapRegions())
-			{
-				RaidRegion region = RaidRegion.fromRegionId(regionId);
-				if (region != null)
-				{
-					return region;
-				}
-			}
-		}
-
-		return null;
 	}
 
 	@Subscribe
