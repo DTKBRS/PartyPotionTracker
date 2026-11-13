@@ -67,7 +67,6 @@ public class PickupManager {
 
     private java.util.function.Consumer<SupplyEventMessage> reportSink;
     private java.util.function.BiFunction<Integer, WorldPoint, List<String>> pendingDropLookup;
-    private boolean suppressChat;
     private final Set<String> uncertainObservations = new HashSet<>();
 
     void coordinate(
@@ -83,37 +82,30 @@ public class PickupManager {
             partyService.send(message);
     }
 
-    void replaceSharedHistory(List<SupplyReport> history, boolean announceLast) {
+    void replaceSharedHistory(List<SupplyReport> history) {
         myDroppedItems.clear();
         seenDrops.clear();
         seenPickups.clear();
         pendingPickups.clear();
-        suppressChat = true;
-        try {
-            for (int i = 0; i < history.size(); i++) {
-                SupplyReport report = history.get(i);
-                suppressChat = !announceLast || i != history.size() - 1;
-                if (report.isDrop()) {
-                    track(
-                            new TrackedItem(
-                                    report.getId(),
-                                    report.getItemId(),
-                                    report.getTile(),
-                                    report.getActor(),
-                                    report.getQuantity(),
-                                    false));
-                } else {
-                    PickedUpItemMessage message =
-                            new PickedUpItemMessage(
-                                    report.getItemId(), report.getTile(), report.getActor());
-                    message.setEventId(report.getId());
-                    message.setQuantity(report.getQuantity());
-                    message.setDropIds(report.getDropIds());
-                    onPickedUpItemMessage(message);
-                }
+        for (SupplyReport report : history) {
+            if (report.isDrop()) {
+                track(
+                        new TrackedItem(
+                                report.getId(),
+                                report.getItemId(),
+                                report.getTile(),
+                                report.getActor(),
+                                report.getQuantity(),
+                                false));
+            } else {
+                PickedUpItemMessage message =
+                        new PickedUpItemMessage(
+                                report.getItemId(), report.getTile(), report.getActor());
+                message.setEventId(report.getId());
+                message.setQuantity(report.getQuantity());
+                message.setDropIds(report.getDropIds());
+                onPickedUpItemMessage(message);
             }
-        } finally {
-            suppressChat = false;
         }
         Set<TrackedItem> active = new HashSet<>(myDroppedItems);
         observed.retainAll(active);
@@ -341,7 +333,6 @@ public class PickupManager {
         matches.forEach(item -> owners.add(item.getOwnerName().toLowerCase(Locale.ROOT)));
         boolean ambiguous =
                 owners.size() > 1 || matches.stream().anyMatch(this::isSharedOwnershipUncertain);
-        String owner = ambiguous ? null : matches.get(0).getOwnerName();
         // Keep original drop IDs so concurrent pickups can reference the same stack.
         // Mixed-owner depletion is deterministic bookkeeping, never attribution.
         matches.sort(Comparator.comparing(TrackedItem::getDropId));
@@ -353,18 +344,6 @@ public class PickupManager {
             toConsume -= consumed;
             if (item.getQuantity() == 0) remove(item);
         }
-        if (owner != null && owner.equalsIgnoreCase(msg.getPickerName())) return;
-        String itemName = client.getItemDefinition(msg.getItemId()).getName();
-        String chatMessage =
-                owner == null
-                        ? String.format(
-                                "%s picked up %d x %s; original owner is uncertain.",
-                                msg.getPickerName(), msg.getQuantity(), itemName)
-                        : String.format(
-                                "%s picked up %d x %s dropped by %s!",
-                                msg.getPickerName(), msg.getQuantity(), itemName, owner);
-        if (!suppressChat)
-            client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", chatMessage, null);
     }
 
     public void menuOptionClicked(MenuOptionClicked event) {

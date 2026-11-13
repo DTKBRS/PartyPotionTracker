@@ -151,7 +151,7 @@ public class PotionTrackerPlugin extends Plugin {
         ensureSharedState();
         if (shared != null && !selectionBlocked) {
             shared.submit(report);
-            refreshTrackedSupplies(true);
+            refreshTrackedSupplies();
         } else if (election != null && !election.blocked()) {
             if (reportsAwaitingElection.size() >= 100) {
                 discoveryQueueFull = true;
@@ -268,8 +268,7 @@ public class PotionTrackerPlugin extends Plugin {
                         election.acceptedHandoff(shared.leader());
                         updateAutomaticCoordinator();
                     }
-                    refreshTrackedSupplies(
-                            "UPDATE".equals(message.kind) || "REPORT".equals(message.kind));
+                    refreshTrackedSupplies();
                 });
     }
 
@@ -342,7 +341,7 @@ public class PotionTrackerPlugin extends Plugin {
             if (shared != null && !selectionBlocked) {
                 if (partyService.getMemberById(shared.leader()) == null) shared.disconnected();
                 shared.tick();
-                refreshTrackedSupplies(false);
+                refreshTrackedSupplies();
             }
             dropManager.gameTick();
             pickupManager.gameTick();
@@ -354,35 +353,6 @@ public class PotionTrackerPlugin extends Plugin {
                 trackedRaid = null;
             }
         }
-    }
-
-    @Subscribe
-    public void onCommandExecuted(CommandExecuted event) {
-        if (!"ppt".equalsIgnoreCase(event.getCommand()) || !isTrackingActive()) return;
-        ensureSharedState();
-        String[] args = event.getArguments();
-        if (shared == null || args.length == 0) {
-            chat(trackingStatus());
-            return;
-        }
-        if ("handoff".equalsIgnoreCase(args[0]) && args.length > 1) {
-            String targetName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-            PartyMember target = partyService.getMemberByDisplayName(targetName);
-            if (target == null) {
-                chat("Handoff target must be in your RuneLite party.");
-                return;
-            }
-            if (election != null && !election.eligible(target.getMemberId())) {
-                chat("Handoff target must be in the same raid.");
-                return;
-            }
-            shared.handoff(target.getMemberId());
-        } else if ("cancel".equalsIgnoreCase(args[0])) shared.cancelHandoff();
-        chat(trackingStatus());
-    }
-
-    private void chat(String text) {
-        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Party supplies: " + text, null);
     }
 
     private void clearTracking() {
@@ -609,14 +579,12 @@ public class PotionTrackerPlugin extends Plugin {
         }
     }
 
-    // Rebuild the overlay's view only when shared history changes. Recovery must not replay old
-    // chat.
-    private void refreshTrackedSupplies(boolean announce) {
+    // Rebuild the local overlay and panel view when shared history changes.
+    private void refreshTrackedSupplies() {
         if (shared == null || projectedGeneration == shared.generation()) return;
         if (shared.leader() == selfMemberId && shared.synchronizedState())
             rememberCoordinatorScope(sharedScope);
-        pickupManager.replaceSharedHistory(
-                shared.history(), announce && projectedRevision + 1 == shared.revision());
+        pickupManager.replaceSharedHistory(shared.history());
         projectedGeneration = shared.generation();
         projectedRevision = shared.revision();
     }

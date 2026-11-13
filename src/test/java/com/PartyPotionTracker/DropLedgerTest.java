@@ -59,7 +59,7 @@ public class DropLedgerTest {
         drop("a", "Owner", 2);
         ledger.gameTick();
         assertEquals(1, ledger.getMyDroppedItems().get(0).getQuantity());
-        verify(client, times(1)).addChatMessage(any(), anyString(), anyString(), any());
+        verify(client, never()).addChatMessage(any(), anyString(), anyString(), any());
     }
 
     @Test public void concurrentPickupsDecrementSameOriginalDrop() {
@@ -75,11 +75,7 @@ public class DropLedgerTest {
         ledger.onPickedUpItemMessage(pickup(1, "a", "b"));
         assertEquals(2, ledger.getMyDroppedItems().get(0).getQuantity());
         assertTrue(ledger.getMyDroppedItems().get(0).isAmbiguous());
-        org.mockito.ArgumentCaptor<String> chat = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(client).addChatMessage(any(), anyString(), chat.capture(), any());
-        assertTrue(chat.getValue().contains("uncertain"));
-        assertFalse(chat.getValue().contains("Alice"));
-        assertFalse(chat.getValue().contains("Bob"));
+        verify(client, never()).addChatMessage(any(), anyString(), anyString(), any());
     }
 
     @Test public void impossibleOrLegacyPickupDoesNotConsumeAnything() {
@@ -123,8 +119,7 @@ public class DropLedgerTest {
         d.setQuantity(3);
         PickedUpItemMessage take = pickup(1, d.getEventId());
         java.util.List<SupplyReport> history = Arrays.asList(SupplyReport.from(d), SupplyReport.from(take));
-        ledger.replaceSharedHistory(history, false);
-        ledger.replaceSharedHistory(history, false);
+        ledger.replaceSharedHistory(history);
         assertEquals(2, ledger.getMyDroppedItems().get(0).getQuantity());
         verify(client, never()).addChatMessage(any(), anyString(), anyString(), any());
     }

@@ -186,7 +186,7 @@ public class RaidGateTest {
                                         "Player1")));
         plugin.onSupplyStateMessage(snapshot);
         assertTrue(plugin.hasFreshSharedState());
-        verify(pickups).replaceSharedHistory(eq(snapshot.history), eq(false));
+        verify(pickups).replaceSharedHistory(eq(snapshot.history));
         when(config.coordinatorName()).thenReturn("Different name");
         plugin.onGameTick(new GameTick());
         assertFalse(plugin.hasFreshSharedState());
@@ -265,12 +265,12 @@ public class RaidGateTest {
                         new net.runelite.api.coords.WorldPoint(3200, 3200, 0),
                         "Player2");
         plugin.submitLocalSupplyEvent(drop);
-        verify(pickups, never()).replaceSharedHistory(any(), anyBoolean());
+        verify(pickups, never()).replaceSharedHistory(any());
         for (int i = 0; i < 40; i++) plugin.onGameTick(new GameTick());
         assertTrue(plugin.hasFreshSharedState());
         org.mockito.ArgumentCaptor<java.util.List<SupplyReport>> history =
                 org.mockito.ArgumentCaptor.forClass(java.util.List.class);
-        verify(pickups).replaceSharedHistory(history.capture(), eq(false));
+        verify(pickups).replaceSharedHistory(history.capture());
         assertEquals(drop.getEventId(), history.getValue().get(0).getId());
     }
 
