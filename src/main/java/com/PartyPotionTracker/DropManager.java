@@ -1,25 +1,11 @@
 package com.PartyPotionTracker;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ItemSpawned;
 import net.runelite.client.party.PartyService;
 
-@Slf4j
-@RequiredArgsConstructor
 public class DropManager {
-
-    private static class PendingDropItem {
-        int itemId;
-        WorldPoint location;
-        public PendingDropItem(int itemId, WorldPoint location) {
-            this.itemId = itemId;
-            this.location = location;
-        }
-    }
-
     private Client client;
     private PartyService partyService;
 
@@ -29,24 +15,32 @@ public class DropManager {
     }
 
 
-    public void itemSpawned(ItemSpawned event) {
+    public TrackedItem itemSpawned(ItemSpawned event) {
 
         TileItem item = event.getItem();
         int itemId = item.getId();
 
-        if (!ToaPotions.isPotion(itemId)) {
-            return;
+        if (!RaidPotions.isPotion(itemId)) {
+            return null;
         }
 
-        int isMyPotion = item.getOwnership();
-
-        if (isMyPotion == 1) {
-            WorldPoint spawnLocation = event.getTile().getWorldLocation();
-            if (partyService != null) {
-                if (partyService.isInParty()) {
-                    partyService.send(new TrackedItemMessage(itemId, spawnLocation, client.getLocalPlayer().getName()));
-                }
-            }
+        if (item.getOwnership() != TileItem.OWNERSHIP_SELF
+                || client.getLocalPlayer() == null) {
+            return null;
         }
+
+        WorldPoint spawnLocation = event.getTile().getWorldLocation();
+        if (spawnLocation == null) {
+            return null;
+        }
+
+        String ownerName = client.getLocalPlayer().getName();
+        TrackedItem trackedItem = new TrackedItem(itemId, spawnLocation, ownerName);
+
+        if (partyService != null && partyService.isInParty()) {
+            partyService.send(new TrackedItemMessage(itemId, spawnLocation, ownerName));
+        }
+
+        return trackedItem;
     }
 }
