@@ -15,7 +15,6 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
 import javax.inject.Inject;
-import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
@@ -206,15 +205,11 @@ public class PotionTrackerOverlay extends Overlay
             case DOT:
                 drawDot(graphics, localPoint, color);
                 break;
-            case TILE_FILL:
-                drawTileFill(graphics, localPoint, color);
-                break;
             case CORNERS:
                 drawCornerMarkers(graphics, localPoint, color);
                 break;
-            case TILE_OUTLINE:
             default:
-                drawTileOutline(graphics, localPoint, color);
+                drawItemOutline(graphics, localPoint, item, color);
                 break;
         }
     }
@@ -234,35 +229,6 @@ public class PotionTrackerOverlay extends Overlay
         }
 
         graphics.drawImage(outline, canvasPoint.getX(), canvasPoint.getY(), null);
-    }
-
-    private void drawTileOutline(Graphics2D graphics, LocalPoint localPoint, Color color)
-    {
-        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
-        if (tilePolygon == null)
-        {
-            return;
-        }
-
-        graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
-        graphics.setColor(withAlpha(color, FILL_ALPHA));
-        graphics.fillPolygon(tilePolygon);
-        graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
-        graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
-        graphics.drawPolygon(tilePolygon);
-    }
-
-    private void drawTileFill(Graphics2D graphics, LocalPoint localPoint, Color color)
-    {
-        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
-        if (tilePolygon == null)
-        {
-            return;
-        }
-
-        graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
-        graphics.setColor(withAlpha(color, FILL_ALPHA));
-        graphics.fillPolygon(tilePolygon);
     }
 
     private void drawCornerMarkers(Graphics2D graphics, LocalPoint localPoint, Color color)
