@@ -101,10 +101,14 @@ final class SupplyInventoryPanel extends PluginPanel {
             for (int i = events.size() - 1; i >= start; i--) {
                 SupplyEventRecord event = events.get(i);
                 String itemName = event.itemName == null ? "Unknown supply" : event.itemName;
-                log.append(event.drop ? "Drop" : "Pickup")
-                        .append(" · ").append(event.actor)
-                        .append(" · ").append(itemName)
-                        .append(" × ").append(event.quantity).append('\n');
+                log.append(event.actor)
+                        .append(event.drop ? " dropped " : " picked up ")
+                        .append(event.quantity)
+                        .append(" × ")
+                        .append(itemName);
+                if (!event.drop && "UNRESOLVED".equals(event.confidence))
+                    log.append(" (owner uncertain)");
+                log.append('\n');
             }
         }
         eventLog.setText(log.toString());
