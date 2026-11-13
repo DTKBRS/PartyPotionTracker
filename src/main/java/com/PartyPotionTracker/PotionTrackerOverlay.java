@@ -9,6 +9,7 @@ import net.runelite.api.TileItem;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -22,6 +23,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Stroke;
+import java.awt.image.BufferedImage;
 
 public class PotionTrackerOverlay extends Overlay
 {
@@ -31,12 +33,14 @@ public class PotionTrackerOverlay extends Overlay
 
     private final Client client;
     private final PotionTrackerPlugin plugin;
+    private final ItemManager itemManager;
 
     @Inject
-    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin)
+    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin, ItemManager itemManager)
     {
         this.client = client;
         this.plugin = plugin;
+        this.itemManager = itemManager;
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
     }
@@ -127,7 +131,7 @@ public class PotionTrackerOverlay extends Overlay
             }
 
             Color color = getColor(kind, trackedItem);
-            drawHighlight(graphics, tile.getLocalLocation(), color);
+            drawHighlight(graphics, tile.getLocalLocation(), item, color);
         }
     }
 
@@ -188,11 +192,14 @@ public class PotionTrackerOverlay extends Overlay
         return UNKNOWN_COLOR;
     }
 
-    private void drawHighlight(Graphics2D graphics, LocalPoint localPoint, Color color)
+    private void drawHighlight(Graphics2D graphics, LocalPoint localPoint, TileItem item, Color color)
     {
         PotionTrackerConfig.HighlightStyle style = plugin.getConfig().highlightStyle();
         switch (style)
         {
+            case ITEM_OUTLINE:
+                drawItemOutline(graphics, localPoint, item, color);
+                break;
             case CIRCLE:
                 drawCircle(graphics, localPoint, color);
                 break;
@@ -210,6 +217,23 @@ public class PotionTrackerOverlay extends Overlay
                 drawTileOutline(graphics, localPoint, color);
                 break;
         }
+    }
+
+    private void drawItemOutline(Graphics2D graphics, LocalPoint localPoint, TileItem item, Color color)
+    {
+        BufferedImage outline = itemManager.getItemOutline(item.getId(), item.getQuantity(), color);
+        if (outline == null || outline.getWidth() == 0 || outline.getHeight() == 0)
+        {
+            return;
+        }
+
+        Point canvasPoint = Perspective.getCanvasImageLocation(client, localPoint, outline, 0);
+        if (canvasPoint == null)
+        {
+            return;
+        }
+
+        graphics.drawImage(outline, canvasPoint.getX(), canvasPoint.getY(), null);
     }
 
     private void drawTileOutline(Graphics2D graphics, LocalPoint localPoint, Color color)
