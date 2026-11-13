@@ -120,7 +120,7 @@ public class PickupManager
 
     public void trackDrop(TrackedItem item)
     {
-        if (item == null || item.getWorldPoint() == null || !ToaPotions.isPotion(item.getItemId()))
+        if (item == null || item.getWorldPoint() == null || !RaidPotions.isPotion(item.getItemId()))
         {
             return;
         }
@@ -207,7 +207,7 @@ public class PickupManager
         }
 
         int itemId = event.getId();
-        if (!ToaPotions.isPotion(itemId))
+        if (!RaidPotions.isPotion(itemId))
         {
             return;
         }

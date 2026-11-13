@@ -20,7 +20,7 @@ public class DropManager {
         TileItem item = event.getItem();
         int itemId = item.getId();
 
-        if (!ToaPotions.isPotion(itemId)) {
+        if (!RaidPotions.isPotion(itemId)) {
             return null;
         }
 

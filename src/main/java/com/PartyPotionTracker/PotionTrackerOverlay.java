@@ -44,7 +44,7 @@ public class PotionTrackerOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (!plugin.isInToa() || client.getLocalPlayer() == null)
+        if (!plugin.isInRaid() || client.getLocalPlayer() == null)
         {
             return null;
         }
@@ -114,7 +114,7 @@ public class PotionTrackerOverlay extends Overlay
 
         for (TileItem item : tile.getGroundItems())
         {
-            if (!ToaPotions.isPotion(item.getId()))
+            if (!RaidPotions.isPotion(item.getId()))
             {
                 continue;
             }

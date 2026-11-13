@@ -1,5 +1,5 @@
 # Party Potion Tracker
-**Tracks and highlights potions dropped in parties, and shows who picks them up (only works in ToA)**
+**Tracks and highlights raid supplies dropped in parties, and shows who picks them up in CoX, ToB, ToA, and TFA**
 
 # Examples
 - Video of a party member taking my potion
