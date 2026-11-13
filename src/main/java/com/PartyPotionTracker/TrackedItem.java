@@ -17,4 +17,11 @@ public class TrackedItem
         this.worldPoint = worldPoint;
         this.ownerName = ownerName;
     }
+
+    public boolean matches(int itemId, WorldPoint worldPoint)
+    {
+        return this.itemId == itemId
+                && this.worldPoint != null
+                && this.worldPoint.equals(worldPoint);
+    }
 }

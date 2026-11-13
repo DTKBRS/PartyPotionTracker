@@ -1,222 +1,373 @@
 package com.PartyPotionTracker;
 
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.*;
+import net.runelite.api.ChatMessageType;
+import net.runelite.api.Client;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.Tile;
+import net.runelite.api.WorldView;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.party.PartyService;
-import java.util.*;
 
-@Slf4j
-public class PickupManager {
-     static class PendingDespawn {
-        final TrackedItem item;
-        int ageTicks = 0;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-        PendingDespawn(TrackedItem item) {
-            this.item = item;
-        }
-    }
+public class PickupManager
+{
+    private static final int EXPECTED_PICKUP_TIMEOUT_TICKS = 5;
 
-    static class ExpectedPickup {
-        int itemId;
-        WorldPoint location;
-        String actionTakenPlayerName;
+    static class ExpectedPickup
+    {
+        final int itemId;
+        final WorldPoint location;
+        final String playerName;
+        final int createdTick;
 
-        public ExpectedPickup(int itemId, WorldPoint location, String actionTakenPlayerName) {
+        ExpectedPickup(int itemId, WorldPoint location, String playerName, int createdTick)
+        {
             this.itemId = itemId;
             this.location = location;
-            this.actionTakenPlayerName = actionTakenPlayerName;
+            this.playerName = playerName;
+            this.createdTick = createdTick;
         }
     }
 
+    static class PendingDespawn
+    {
+        final int itemId;
+        final WorldPoint location;
 
-    private Client client;
-    private PartyService partyService;
-    private ClientThread clientThread;
+        PendingDespawn(int itemId, WorldPoint location)
+        {
+            this.itemId = itemId;
+            this.location = location;
+        }
+    }
 
-    public PickupManager(Client client, PartyService partyService, ClientThread clientThread) {
+    private final Client client;
+    private final PartyService partyService;
+    private final ClientThread clientThread;
+
+    private ExpectedPickup expectedPickup;
+
+    /**
+     * Owner metadata for potion ground items. The overlay only draws a record
+     * when the corresponding ground item is currently present in the scene.
+     */
+    @Getter
+    private final List<TrackedItem> myDroppedItems = new CopyOnWriteArrayList<>();
+
+    private final List<PendingDespawn> pendingDespawns = new CopyOnWriteArrayList<>();
+
+    private Map<Integer, Integer> previousInventory;
+
+    public PickupManager(Client client, PartyService partyService, ClientThread clientThread)
+    {
         this.client = client;
         this.partyService = partyService;
         this.clientThread = clientThread;
-
     }
 
-    private ExpectedPickup lastExpectedPickup = null;
-    public final List<PickupManager.PendingDespawn> pendingDespawnItem = new ArrayList<>();
-
-    @Getter
-    public final List<TrackedItem> myDroppedItems= new ArrayList<>();
-
-    private Map<Integer, Integer> previousInventory = null;
-
-    public void gameTick() {
-
-        if (pendingDespawnItem.isEmpty()) return;
-
-        Iterator<PickupManager.PendingDespawn> iter = pendingDespawnItem.iterator();
-        while (iter.hasNext())
-        {
-            PickupManager.PendingDespawn pd = iter.next();
-            pd.ageTicks++;
-
-            // Give it time for PickedUpItemMessage to arrive
-            if (pd.ageTicks < 2)
-                continue;
-
-            if (myDroppedItems.contains(pd.item))
-            {
-
-                myDroppedItems.remove(pd.item);
-                String itemName = client.getItemDefinition(pd.item.getItemId()).getName();
-                String msg = String.format("%s was picked up by someone outside your party.", itemName);
-                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, null);
-            }
-
-            iter.remove();
-        }
+    public void clear()
+    {
+        myDroppedItems.clear();
+        pendingDespawns.clear();
+        previousInventory = null;
+        expectedPickup = null;
     }
 
-
-    public void onPickedUpItemMessage(PickedUpItemMessage msg){
-
-        TrackedItem matchedItem = null;
-        for (TrackedItem cur : myDroppedItems)
+    public void gameTick()
+    {
+        if (expectedPickup != null
+                && client.getTickCount() - expectedPickup.createdTick > EXPECTED_PICKUP_TIMEOUT_TICKS)
         {
-            if (cur.getItemId() == msg.getItemId() &&
-                    cur.getWorldPoint().equals(msg.getWorldPoint()) &&
-                    cur.getOwnerName().equalsIgnoreCase(msg.getPickerName()))
-            {
-                matchedItem = cur;
-                break;
-            }
+            expectedPickup = null;
         }
 
-        if (matchedItem != null)
+        processPendingDespawns();
+    }
+
+    /**
+     * ItemDespawned describes a change to the currently loaded scene. It is
+     * not safe to remove metadata immediately because scene rebuilds can emit
+     * the same event while a potion still exists in the raid.
+     */
+    public void itemDespawned(int itemId, WorldPoint location)
+    {
+        if (location == null || findTrackedItem(itemId, location) == null)
         {
-            // Decrement quantity or remove
-            myDroppedItems.remove(matchedItem);
-            Iterator<PickupManager.PendingDespawn> iter = pendingDespawnItem.iterator();
-            while (iter.hasNext())
-            {
-                PickupManager.PendingDespawn pd = iter.next();
-                if (pd.item.equals(matchedItem))
-                {
-                    iter.remove();
-                    break;
-                }
-            }
             return;
         }
 
-        for (TrackedItem cur : myDroppedItems)
+        for (PendingDespawn pending : pendingDespawns)
         {
-            if (cur.getItemId() == msg.getItemId() &&
-                    cur.getWorldPoint().equals(msg.getWorldPoint()))
+            if (pending.itemId == itemId && pending.location.equals(location))
             {
-                matchedItem = cur;
-                break;
+                return;
             }
         }
 
-        if (matchedItem != null){
-            Iterator<PickupManager.PendingDespawn> iter = pendingDespawnItem.iterator();
-            while (iter.hasNext())
+        pendingDespawns.add(new PendingDespawn(itemId, location));
+    }
+
+    public void trackDrop(TrackedItem item)
+    {
+        if (item == null || item.getWorldPoint() == null || !ToaPotions.isPotion(item.getItemId()))
+        {
+            return;
+        }
+
+        TrackedItem existing = findTrackedItem(item.getItemId(), item.getWorldPoint());
+        if (existing != null)
+        {
+            if (equalsIgnoreCase(existing.getOwnerName(), item.getOwnerName()))
             {
-                PickupManager.PendingDespawn pd = iter.next();
-                if (pd.item.equals(matchedItem))
-                {
-                    iter.remove();
-                    break;
-                }
+                return;
             }
-            String ownerName = matchedItem.getOwnerName();
-            myDroppedItems.remove(matchedItem);
+
+            myDroppedItems.remove(existing);
+        }
+
+        myDroppedItems.add(item);
+    }
+
+    public TrackedItem findTrackedItem(int itemId, WorldPoint location)
+    {
+        if (location == null)
+        {
+            return null;
+        }
+
+        for (TrackedItem item : myDroppedItems)
+        {
+            if (item.matches(itemId, location))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    private void removeTrackedItem(int itemId, WorldPoint location)
+    {
+        TrackedItem trackedItem = findTrackedItem(itemId, location);
+        if (trackedItem != null)
+        {
+            myDroppedItems.remove(trackedItem);
+        }
+
+        pendingDespawns.removeIf(pending -> pending.itemId == itemId
+                && pending.location.equals(location));
+    }
+
+    public void onPickedUpItemMessage(PickedUpItemMessage message)
+    {
+        TrackedItem trackedItem = findTrackedItem(message.getItemId(), message.getWorldPoint());
+        if (trackedItem == null)
+        {
+            return;
+        }
+
+        myDroppedItems.remove(trackedItem);
+        pendingDespawns.removeIf(pending -> pending.itemId == message.getItemId()
+                && pending.location.equals(message.getWorldPoint()));
+
+        // Only report a pickup by somebody other than the owner. The owner
+        // already knows they picked up their own potion.
+        if (!equalsIgnoreCase(trackedItem.getOwnerName(), message.getPickerName()))
+        {
             clientThread.invokeLater(() ->
             {
-                String itemName = client.getItemDefinition(msg.getItemId()).getName();
-                String chatMessage = String.format("%s picked up a %s dropped by %s!", msg.getPickerName(), itemName, ownerName);
+                String itemName = client.getItemDefinition(message.getItemId()).getName();
+                String chatMessage = String.format(
+                        "%s picked up a %s dropped by %s!",
+                        message.getPickerName(),
+                        itemName,
+                        trackedItem.getOwnerName());
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", chatMessage, null);
             });
         }
     }
 
-    public void menuOptionClicked(MenuOptionClicked event) {
-        if (event.getMenuOption().equalsIgnoreCase("Take")) {
-            int itemId = event.getMenuEntry().getIdentifier();
-            if (!ToaPotions.isPotion(itemId))
-                return;
-
-            if (client.getTopLevelWorldView().getSelectedSceneTile() != null){
-                WorldPoint location = client.getTopLevelWorldView().getSelectedSceneTile().getWorldLocation();
-                if (location != null)
-                {
-                    String playerName = client.getLocalPlayer().getName();
-                    lastExpectedPickup = new ExpectedPickup(itemId, location, playerName);
-                }
-            }
-        } else {
-            lastExpectedPickup = null;
-        }
-    }
-
-    public void itemContainerChanged(ItemContainerChanged event) {
-
-        // Return early if it's not an inventory update
-        if (event.getContainerId() != InventoryID.INVENTORY.getId()) {
+    public void menuOptionClicked(MenuOptionClicked event)
+    {
+        if (!"Take".equalsIgnoreCase(event.getMenuOption()))
+        {
+            expectedPickup = null;
             return;
         }
 
-        ItemContainer itemContainer = event.getItemContainer();
-        Item[] currentItems = itemContainer.getItems();
-        Map<Integer, Integer> currentInventory = new HashMap<>();
-
-        for (Item item : currentItems)
+        int itemId = event.getId();
+        if (!ToaPotions.isPotion(itemId))
         {
-            if (item.getId() != -1)
-            {
-                currentInventory.merge(item.getId(), item.getQuantity(), Integer::sum);
-            }
+            return;
         }
 
-        // If this is the first time we're seeing inventory, just set inventory and return
-        if (previousInventory == null || lastExpectedPickup == null)
+        WorldPoint location = getInteractionLocation(event);
+        if (location == null || client.getLocalPlayer() == null)
+        {
+            return;
+        }
+
+        expectedPickup = new ExpectedPickup(
+                itemId,
+                location,
+                client.getLocalPlayer().getName(),
+                client.getTickCount());
+    }
+
+    public void itemContainerChanged(ItemContainerChanged event)
+    {
+        if (event.getContainerId() != InventoryID.INVENTORY.getId())
+        {
+            return;
+        }
+
+        Map<Integer, Integer> currentInventory = snapshot(event.getItemContainer());
+        if (previousInventory == null)
         {
             previousInventory = currentInventory;
             return;
         }
 
-        // Combine all unique item IDs from both inventories to catch missing (zeroed) items
-        Set<Integer> allItemIds = new HashSet<>();
-        allItemIds.addAll(previousInventory.keySet());
-        allItemIds.addAll(currentInventory.keySet());
-
-        for (int itemId : allItemIds)
+        ExpectedPickup pickup = expectedPickup;
+        if (pickup != null)
         {
-            if (itemId == -1 || !ToaPotions.isPotion(itemId))
-                continue;
+            int oldQuantity = previousInventory.getOrDefault(pickup.itemId, 0);
+            int newQuantity = currentInventory.getOrDefault(pickup.itemId, 0);
 
-            int oldQty = previousInventory.getOrDefault(itemId, 0);
-            int newQty = currentInventory.getOrDefault(itemId, 0);
-
-            if (newQty > oldQty)
+            if (newQuantity > oldQuantity)
             {
-                // Potion pickup detected
-                WorldPoint location = client.getLocalPlayer().getWorldLocation();
-                String localName = client.getLocalPlayer().getName();
-                if (partyService != null) {
-                    if (partyService.isInParty()) {
-                        partyService.send(new PickedUpItemMessage(itemId, location, localName));
-                    }
+                removeTrackedItem(pickup.itemId, pickup.location);
+
+                if (partyService != null && partyService.isInParty())
+                {
+                    partyService.send(new PickedUpItemMessage(
+                            pickup.itemId,
+                            pickup.location,
+                            pickup.playerName));
                 }
+
+                expectedPickup = null;
             }
         }
 
-        // Update inventory snapshot after processing
-        lastExpectedPickup = null;
         previousInventory = currentInventory;
+    }
+
+    private WorldPoint getInteractionLocation(MenuOptionClicked event)
+    {
+        WorldView worldView = client.getTopLevelWorldView();
+        if (worldView != null && worldView.getScene() != null)
+        {
+            Tile[][][] tiles = worldView.getScene().getTiles();
+            int plane = worldView.getPlane();
+            int sceneX = event.getParam0();
+            int sceneY = event.getParam1();
+
+            if (plane >= 0 && plane < tiles.length
+                    && sceneX >= 0 && sceneX < tiles[plane].length
+                    && sceneY >= 0 && sceneY < tiles[plane][sceneX].length
+                    && tiles[plane][sceneX][sceneY] != null)
+            {
+                return tiles[plane][sceneX][sceneY].getWorldLocation();
+            }
+
+            Tile selectedTile = worldView.getSelectedSceneTile();
+            if (selectedTile != null)
+            {
+                return selectedTile.getWorldLocation();
+            }
+        }
+
+        return null;
+    }
+
+    private void processPendingDespawns()
+    {
+        for (PendingDespawn pending : pendingDespawns)
+        {
+            Tile currentTile = getLoadedTile(pending.location);
+            if (currentTile == null)
+            {
+                // The tile is outside the current scene. Keep the metadata so
+                // it can be used if the player walks back into render range.
+                continue;
+            }
+
+            boolean stillPresent = currentTile.getGroundItems() != null
+                    && currentTile.getGroundItems().stream()
+                    .anyMatch(item -> item.getId() == pending.itemId);
+
+            if (!stillPresent)
+            {
+                removeTrackedItem(pending.itemId, pending.location);
+            }
+            else
+            {
+                pendingDespawns.remove(pending);
+            }
+        }
+    }
+
+    private Tile getLoadedTile(WorldPoint location)
+    {
+        WorldView worldView = client.getTopLevelWorldView();
+        if (worldView == null || worldView.getScene() == null)
+        {
+            return null;
+        }
+
+        LocalPoint localPoint = LocalPoint.fromWorld(worldView, location);
+        if (localPoint == null || !localPoint.isInScene())
+        {
+            return null;
+        }
+
+        Tile[][][] tiles = worldView.getScene().getTiles();
+        int plane = worldView.getPlane();
+        int sceneX = localPoint.getSceneX();
+        int sceneY = localPoint.getSceneY();
+        if (plane < 0 || plane >= tiles.length
+                || sceneX < 0 || sceneX >= tiles[plane].length
+                || sceneY < 0 || sceneY >= tiles[plane][sceneX].length)
+        {
+            return null;
+        }
+
+        return tiles[plane][sceneX][sceneY];
+    }
+
+    private static Map<Integer, Integer> snapshot(ItemContainer container)
+    {
+        Map<Integer, Integer> snapshot = new HashMap<>();
+        if (container == null)
+        {
+            return snapshot;
+        }
+
+        for (Item item : container.getItems())
+        {
+            if (item.getId() >= 0)
+            {
+                snapshot.merge(item.getId(), item.getQuantity(), Integer::sum);
+            }
+        }
+
+        return snapshot;
+    }
+
+    private static boolean equalsIgnoreCase(String first, String second)
+    {
+        return first == null ? second == null : first.equalsIgnoreCase(second);
     }
 }

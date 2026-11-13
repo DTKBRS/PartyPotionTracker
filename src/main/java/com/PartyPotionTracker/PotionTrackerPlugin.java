@@ -18,7 +18,7 @@ import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.party.PartyPlugin;
 import net.runelite.client.plugins.party.PartyPluginService;
-import net.runelite.client.plugins.party.data.PartyData;
+import net.runelite.client.plugins.party.data.PartyMemberData;
 import net.runelite.client.ui.overlay.OverlayManager;
 import java.awt.*;
 import net.runelite.client.party.WSClient;
@@ -65,7 +65,7 @@ public class PotionTrackerPlugin extends Plugin
 	private PickupManager pickupManager;
 	private DropManager dropManager;
 
-	private Boolean inToa = false;
+	private boolean inToa = false;
 
 
 	@Provides
@@ -95,8 +95,11 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onTrackedItemMessage(TrackedItemMessage msg) {
-		TrackedItem tracked = new TrackedItem(msg.getItemId(), msg.getWorldPoint(), msg.getOwnerName());
-		pickupManager.myDroppedItems.add(tracked);
+		if (!inToa || msg.getWorldPoint() == null || !ToaPotions.isPotion(msg.getItemId())) {
+			return;
+		}
+
+		pickupManager.trackDrop(new TrackedItem(msg.getItemId(), msg.getWorldPoint(), msg.getOwnerName()));
 	}
 
 
@@ -114,40 +117,42 @@ public class PotionTrackerPlugin extends Plugin
 		}
 	}
 
-
 	@Subscribe
 	public void onItemDespawned(ItemDespawned event) {
-		if (inToa){
-			TileItem item = event.getItem();
-			WorldPoint location = event.getTile().getWorldLocation();
-
-			TrackedItem matched = pickupManager.myDroppedItems.stream()
-					.filter(i -> i.getItemId() == item.getId() && i.getWorldPoint().equals(location))
-					.findFirst()
-					.orElse(null);
-
-			if (matched != null)
-			{
-				pickupManager.pendingDespawnItem.add(new PickupManager.PendingDespawn(matched)); // ✅ Delay removal
-				log.info("Queued despawn of itemId {} at {} for delayed processing", item.getId(), location);
-			}
+		if (inToa) {
+			pickupManager.itemDespawned(
+					event.getItem().getId(),
+					event.getTile().getWorldLocation());
 		}
 	}
+
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged gameState) {
 		if (gameState.getGameState().equals(GameState.LOADING)){
-			pickupManager.pendingDespawnItem.clear();
-			pickupManager.myDroppedItems.clear();
+			pickupManager.clear();
 		}
 	}
 
 	@Subscribe
 	public void onGameTick(GameTick tick) {
+		if (client.getLocalPlayer() == null) {
+			if (inToa) {
+				pickupManager.clear();
+			}
+			inToa = false;
+			return;
+		}
+
 		LocalPoint lp = client.getLocalPlayer().getLocalLocation();
 		int regionId = lp == null ? -1 : WorldPoint.fromLocalInstance(client, lp).getRegionID();
 		ToaRegion currentRegion = ToaRegion.fromRegionID(regionId);
-        inToa = currentRegion != null;
+		boolean wasInToa = inToa;
+		inToa = currentRegion != null;
+
+		if (wasInToa && !inToa) {
+			pickupManager.clear();
+		}
 
 		if (inToa){
 			pickupManager.gameTick();
@@ -157,26 +162,48 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event) {
 		if (inToa){
-			dropManager.itemSpawned(event);
+			TrackedItem trackedItem = dropManager.itemSpawned(event);
+			if (trackedItem != null) {
+				pickupManager.trackDrop(trackedItem);
+			}
 		}
 	}
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
-		pickupManager.itemContainerChanged(event);
+		if (inToa) {
+			pickupManager.itemContainerChanged(event);
+		}
 	}
 
 	public Color getColorForPartyMember(String name)
 	{
-		PartyData data = null;
-		if (partyService != null && partyService.isInParty()){
-			data = partyPluginService.getPartyData(partyService.getMemberByDisplayName(name).getMemberId());
+		if (name == null) {
+			return Color.LIGHT_GRAY;
 		}
 
-		if (data != null){
+		if (client.getLocalPlayer() != null
+				&& name.equalsIgnoreCase(client.getLocalPlayer().getName())) {
+			return Color.CYAN;
+		}
+
+		PartyMemberData data = null;
+		if (partyService != null && partyService.isInParty() && partyPluginService != null){
+			net.runelite.client.party.PartyMember member = partyService.getMemberByDisplayName(name);
+			if (member != null) {
+				data = partyPluginService.getPartyData(member.getMemberId());
+			}
+		}
+
+		if (data != null && data.getColor() != null){
 			return data.getColor();
 		}
 
-		return Color.BLACK;
+		return Color.LIGHT_GRAY;
+	}
+
+	boolean isInToa()
+	{
+		return inToa;
 	}
 }
