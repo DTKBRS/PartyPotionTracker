@@ -137,6 +137,7 @@ public class PotionTrackerOverlay extends Overlay
     private HighlightKind getHighlightKind(TileItem item, TrackedItem trackedItem)
     {
         if (item.getOwnership() == TileItem.OWNERSHIP_SELF
+                || plugin.getDropManager().isExpectedLocalDrop(item.getId())
                 || isLocalOwner(trackedItem))
         {
             return HighlightKind.OWN;
@@ -219,12 +220,14 @@ public class PotionTrackerOverlay extends Overlay
         BufferedImage outline = itemManager.getItemOutline(item.getId(), item.getQuantity(), color);
         if (outline == null || outline.getWidth() == 0 || outline.getHeight() == 0)
         {
+            drawCircle(graphics, localPoint, color);
             return;
         }
 
         Point canvasPoint = Perspective.getCanvasImageLocation(client, localPoint, outline, 0);
         if (canvasPoint == null)
         {
+            drawCircle(graphics, localPoint, color);
             return;
         }
 
