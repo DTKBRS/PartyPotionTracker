@@ -44,6 +44,9 @@ public class PotionTrackerPlugin extends Plugin
 	@Inject
 	private PartyService partyService;
 
+	@Inject
+	private ConfigManager configManager;
+
 	@Getter(AccessLevel.PACKAGE)
 	@Inject
 	private PartyPluginService partyPluginService;
@@ -76,11 +79,24 @@ public class PotionTrackerPlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
+		migrateRemovedHighlightStyles();
 		dropManager = new DropManager(client, partyService);
 		pickupManager = new PickupManager(client, partyService, clientThread);
 		wsClient.registerMessage(TrackedItemMessage.class);
 		wsClient.registerMessage(PickedUpItemMessage.class);
 		overlayManager.add(overlay);
+	}
+
+	private void migrateRemovedHighlightStyles()
+	{
+		String savedStyle = configManager.getConfiguration("PotionTrackerConfig", "highlightStyle");
+		if ("TILE_OUTLINE".equals(savedStyle) || "TILE_FILL".equals(savedStyle))
+		{
+			configManager.setConfiguration(
+					"PotionTrackerConfig",
+					"highlightStyle",
+					PotionTrackerConfig.HighlightStyle.ITEM_OUTLINE.name());
+		}
 	}
 
 	@Override
