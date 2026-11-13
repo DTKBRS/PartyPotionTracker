@@ -182,11 +182,6 @@ public class PotionTrackerPlugin extends Plugin
 			return Color.LIGHT_GRAY;
 		}
 
-		if (client.getLocalPlayer() != null
-				&& name.equalsIgnoreCase(client.getLocalPlayer().getName())) {
-			return Color.CYAN;
-		}
-
 		PartyMemberData data = null;
 		if (partyService != null && partyService.isInParty() && partyPluginService != null){
 			net.runelite.client.party.PartyMember member = partyService.getMemberByDisplayName(name);

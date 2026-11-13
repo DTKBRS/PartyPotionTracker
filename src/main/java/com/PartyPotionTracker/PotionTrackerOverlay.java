@@ -174,7 +174,10 @@ public class PotionTrackerOverlay extends Overlay
     {
         if (kind == HighlightKind.OWN)
         {
-            return Color.CYAN;
+            String ownerName = trackedItem == null || trackedItem.getOwnerName() == null
+                    ? client.getLocalPlayer() == null ? null : client.getLocalPlayer().getName()
+                    : trackedItem.getOwnerName();
+            return plugin.getColorForPartyMember(ownerName);
         }
 
         if (kind == HighlightKind.PARTY && trackedItem != null)
