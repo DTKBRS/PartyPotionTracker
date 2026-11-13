@@ -199,6 +199,12 @@ public class PotionTrackerOverlay extends Overlay
             case DOT:
                 drawDot(graphics, localPoint, color);
                 break;
+            case TILE_FILL:
+                drawTileFill(graphics, localPoint, color);
+                break;
+            case CORNERS:
+                drawCornerMarkers(graphics, localPoint, color);
+                break;
             case TILE_OUTLINE:
             default:
                 drawTileOutline(graphics, localPoint, color);
@@ -220,6 +226,52 @@ public class PotionTrackerOverlay extends Overlay
         graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
         graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
         graphics.drawPolygon(tilePolygon);
+    }
+
+    private void drawTileFill(Graphics2D graphics, LocalPoint localPoint, Color color)
+    {
+        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
+        if (tilePolygon == null)
+        {
+            return;
+        }
+
+        graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
+        graphics.setColor(withAlpha(color, FILL_ALPHA));
+        graphics.fillPolygon(tilePolygon);
+    }
+
+    private void drawCornerMarkers(Graphics2D graphics, LocalPoint localPoint, Color color)
+    {
+        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
+        if (tilePolygon == null || tilePolygon.npoints < 2)
+        {
+            return;
+        }
+
+        graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
+        graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
+
+        for (int i = 0; i < tilePolygon.npoints; i++)
+        {
+            int next = (i + 1) % tilePolygon.npoints;
+            int previous = (i + tilePolygon.npoints - 1) % tilePolygon.npoints;
+            int x = tilePolygon.xpoints[i];
+            int y = tilePolygon.ypoints[i];
+
+            drawCornerSegment(graphics, x, y,
+                    tilePolygon.xpoints[next], tilePolygon.ypoints[next]);
+            drawCornerSegment(graphics, x, y,
+                    tilePolygon.xpoints[previous], tilePolygon.ypoints[previous]);
+        }
+    }
+
+    private void drawCornerSegment(Graphics2D graphics, int startX, int startY, int endX, int endY)
+    {
+        int cornerLength = 4;
+        int x = startX + (endX - startX) / cornerLength;
+        int y = startY + (endY - startY) / cornerLength;
+        graphics.drawLine(startX, startY, x, y);
     }
 
     private void drawCircle(Graphics2D graphics, LocalPoint localPoint, Color color)

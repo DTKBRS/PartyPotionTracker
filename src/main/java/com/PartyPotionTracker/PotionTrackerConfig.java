@@ -76,8 +76,10 @@ public interface PotionTrackerConfig extends Config{
     enum HighlightStyle
     {
         TILE_OUTLINE,
+        TILE_FILL,
         CIRCLE,
-        DOT;
+        DOT,
+        CORNERS;
 
         @Override
         public String toString()
@@ -86,8 +88,12 @@ public interface PotionTrackerConfig extends Config{
             {
                 case TILE_OUTLINE:
                     return "Tile outline";
+                case TILE_FILL:
+                    return "Tile fill";
                 case CIRCLE:
                     return "Circle";
+                case CORNERS:
+                    return "Corner markers";
                 case DOT:
                 default:
                     return "Dot";
