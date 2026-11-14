@@ -58,14 +58,14 @@ public interface PotionTrackerConfig extends Config{
             position = 4
     )
     default HighlightStyle highlightStyle(){
-        return HighlightStyle.TILE_OUTLINE;
+        return HighlightStyle.ITEM_OUTLINE;
     }
 
     @Range(min = 1, max = 6)
     @ConfigItem(
             keyName = "outlineWidth",
             name = "Outline width",
-            description = "Width of the potion tile outline",
+            description = "Width of the potion model outline and geometric markers",
             section = HIGHLIGHT_SECTION,
             position = 5
     )
@@ -75,19 +75,19 @@ public interface PotionTrackerConfig extends Config{
 
     enum HighlightStyle
     {
-        TILE_OUTLINE,
-        CIRCLE,
-        DOT;
+        ITEM_OUTLINE,
+        DOT,
+        CORNERS;
 
         @Override
         public String toString()
         {
             switch (this)
             {
-                case TILE_OUTLINE:
-                    return "Tile outline";
-                case CIRCLE:
-                    return "Circle";
+                case ITEM_OUTLINE:
+                    return "Potion outline";
+                case CORNERS:
+                    return "Corner markers";
                 case DOT:
                 default:
                     return "Dot";

@@ -35,6 +35,8 @@ import net.runelite.client.party.WSClient;
 )
 public class PotionTrackerPlugin extends Plugin
 {
+	private static final boolean DEBUG_LOGGING = Boolean.getBoolean("ppt.debug");
+
 	@Inject
 	private WSClient wsClient;
 
@@ -43,6 +45,9 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Inject
 	private PartyService partyService;
+
+	@Inject
+	private ConfigManager configManager;
 
 	@Getter(AccessLevel.PACKAGE)
 	@Inject
@@ -66,6 +71,8 @@ public class PotionTrackerPlugin extends Plugin
 	private DropManager dropManager;
 
 	private boolean inRaid = false;
+	private int lastRegionId = Integer.MIN_VALUE;
+	private RaidRegion lastRaidRegion;
 
 
 	@Provides
@@ -76,11 +83,29 @@ public class PotionTrackerPlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
+		migrateRemovedHighlightStyles();
 		dropManager = new DropManager(client, partyService);
 		pickupManager = new PickupManager(client, partyService, clientThread);
 		wsClient.registerMessage(TrackedItemMessage.class);
 		wsClient.registerMessage(PickedUpItemMessage.class);
 		overlayManager.add(overlay);
+		debug("plugin started: highlightStyle={}, own={}, party={}, unknown={}",
+				config.highlightStyle(), config.highlightOwnPotions(),
+				config.highlightPartyPotions(), config.highlightUnknownPotions());
+	}
+
+	private void migrateRemovedHighlightStyles()
+	{
+		String savedStyle = configManager.getConfiguration("PotionTrackerConfig", "highlightStyle");
+		if ("TILE_OUTLINE".equals(savedStyle)
+				|| "TILE_FILL".equals(savedStyle)
+				|| "CIRCLE".equals(savedStyle))
+		{
+			configManager.setConfiguration(
+					"PotionTrackerConfig",
+					"highlightStyle",
+					PotionTrackerConfig.HighlightStyle.ITEM_OUTLINE.name());
+		}
 	}
 
 	@Override
@@ -105,6 +130,8 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
+		debug("menu option: option={}, id={}, param0={}, param1={}, inRaid={}",
+				event.getMenuOption(), event.getId(), event.getParam0(), event.getParam1(), inRaid);
 		if (inRaid){
 			pickupManager.menuOptionClicked(event);
 		}
@@ -145,10 +172,26 @@ public class PotionTrackerPlugin extends Plugin
 		}
 
 		LocalPoint lp = client.getLocalPlayer().getLocalLocation();
-		int regionId = lp == null ? -1 : WorldPoint.fromLocalInstance(client, lp).getRegionID();
+		WorldPoint mappedPoint = lp == null ? null : WorldPoint.fromLocalInstance(client, lp);
+		int regionId = mappedPoint == null ? -1 : mappedPoint.getRegionID();
 		RaidRegion currentRegion = RaidRegion.fromRegionId(regionId);
+		if (DEBUG_LOGGING && (regionId != lastRegionId || currentRegion != lastRaidRegion))
+		{
+			debug("raid state check: mappedPoint={}, regionId={}, raidRegion={}, inInstancedRegion={}, mapRegions={}",
+					mappedPoint,
+					regionId,
+					currentRegion,
+					client.isInInstancedRegion(),
+					client.getTopLevelWorldView() == null ? null : java.util.Arrays.toString(client.getTopLevelWorldView().getMapRegions()));
+			lastRegionId = regionId;
+			lastRaidRegion = currentRegion;
+		}
 		boolean wasInRaid = inRaid;
 		inRaid = currentRegion != null;
+		if (DEBUG_LOGGING && wasInRaid != inRaid)
+		{
+			debug("raid state changed: {} -> {}", wasInRaid, inRaid);
+		}
 
 		if (wasInRaid && !inRaid) {
 			pickupManager.clear();
@@ -161,6 +204,10 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event) {
+		debug("item spawned event received: id={}, tile={}, inRaid={}",
+				event.getItem() == null ? null : event.getItem().getId(),
+				event.getTile() == null ? null : event.getTile().getWorldLocation(),
+				inRaid);
 		if (inRaid){
 			TrackedItem trackedItem = dropManager.itemSpawned(event);
 			if (trackedItem != null) {
@@ -200,5 +247,13 @@ public class PotionTrackerPlugin extends Plugin
 	boolean isInRaid()
 	{
 		return inRaid;
+	}
+
+	private void debug(String message, Object... arguments)
+	{
+		if (DEBUG_LOGGING)
+		{
+			log.info("[PPT DEBUG] " + message, arguments);
+		}
 	}
 }

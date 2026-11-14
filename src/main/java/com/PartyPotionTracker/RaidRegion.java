@@ -21,7 +21,7 @@ public enum RaidRegion
             15188, 15696, 15698, 15700),
 
     // The Fractured Archive (Raids 4).
-    TFA(16214, 16726, 16215, 16727, 16216, 16728, 16472, 16474);
+    TFA(16214, 16726, 16215, 16727, 16216, 16728, 16471, 16472, 16474);
 
     private static final Map<Integer, RaidRegion> REGION_MAP = new HashMap<>();
 

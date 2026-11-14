@@ -15,6 +15,7 @@ public class RaidSupportTest
         assertEquals(RaidRegion.TOB, RaidRegion.fromRegionId(12611));
         assertEquals(RaidRegion.TOA, RaidRegion.fromRegionId(14160));
         assertEquals(RaidRegion.TFA, RaidRegion.fromRegionId(16214));
+        assertEquals(RaidRegion.TFA, RaidRegion.fromRegionId(16471));
         assertEquals(RaidRegion.COX, RaidRegion.fromRegionId(12889));
     }
 

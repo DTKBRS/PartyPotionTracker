@@ -12,9 +12,9 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 
 import javax.inject.Inject;
-import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
@@ -26,17 +26,18 @@ import java.awt.Stroke;
 public class PotionTrackerOverlay extends Overlay
 {
     private static final Color UNKNOWN_COLOR = Color.LIGHT_GRAY;
-    private static final int FILL_ALPHA = 55;
     private static final int OUTLINE_ALPHA = 220;
 
     private final Client client;
     private final PotionTrackerPlugin plugin;
+    private final ModelOutlineRenderer modelOutlineRenderer;
 
     @Inject
-    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin)
+    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin, ModelOutlineRenderer modelOutlineRenderer)
     {
         this.client = client;
         this.plugin = plugin;
+        this.modelOutlineRenderer = modelOutlineRenderer;
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
     }
@@ -127,7 +128,7 @@ public class PotionTrackerOverlay extends Overlay
             }
 
             Color color = getColor(kind, trackedItem);
-            drawHighlight(graphics, tile.getLocalLocation(), color);
+            drawHighlight(graphics, tile, tile.getLocalLocation(), item, color);
         }
     }
 
@@ -188,54 +189,84 @@ public class PotionTrackerOverlay extends Overlay
         return UNKNOWN_COLOR;
     }
 
-    private void drawHighlight(Graphics2D graphics, LocalPoint localPoint, Color color)
+    private void drawHighlight(
+            Graphics2D graphics,
+            Tile tile,
+            LocalPoint localPoint,
+            TileItem item,
+            Color color)
     {
         PotionTrackerConfig.HighlightStyle style = plugin.getConfig().highlightStyle();
         switch (style)
         {
-            case CIRCLE:
-                drawCircle(graphics, localPoint, color);
+            case ITEM_OUTLINE:
+                drawItemOutline(graphics, tile, item, localPoint, color);
                 break;
             case DOT:
                 drawDot(graphics, localPoint, color);
                 break;
-            case TILE_OUTLINE:
+            case CORNERS:
+                drawCornerMarkers(graphics, localPoint, color);
+                break;
             default:
-                drawTileOutline(graphics, localPoint, color);
+                drawItemOutline(graphics, tile, item, localPoint, color);
                 break;
         }
     }
 
-    private void drawTileOutline(Graphics2D graphics, LocalPoint localPoint, Color color)
+    private void drawItemOutline(
+            Graphics2D graphics,
+            Tile tile,
+            TileItem item,
+            LocalPoint localPoint,
+            Color color)
     {
-        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
-        if (tilePolygon == null)
+        if (tile.getItemLayer() != null && item != null)
         {
+            modelOutlineRenderer.drawOutline(
+                    tile.getItemLayer(),
+                    item,
+                    plugin.getConfig().outlineWidth(),
+                    color,
+                    4);
             return;
         }
 
-        graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
-        graphics.setColor(withAlpha(color, FILL_ALPHA));
-        graphics.fillPolygon(tilePolygon);
-        graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
-        graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
-        graphics.drawPolygon(tilePolygon);
+        // The model layer can be absent during a scene rebuild. There is no
+        // tile-fill fallback because tile highlighting is intentionally removed.
     }
 
-    private void drawCircle(Graphics2D graphics, LocalPoint localPoint, Color color)
+    private void drawCornerMarkers(Graphics2D graphics, LocalPoint localPoint, Color color)
     {
-        Point canvasPoint = Perspective.localToCanvas(client, localPoint, 0);
-        if (canvasPoint == null)
+        Polygon tilePolygon = Perspective.getCanvasTilePoly(client, localPoint);
+        if (tilePolygon == null || tilePolygon.npoints < 2)
         {
             return;
         }
 
-        int radius = 8;
-        graphics.setColor(withAlpha(color, FILL_ALPHA));
-        graphics.fillOval(canvasPoint.getX() - radius, canvasPoint.getY() - radius, radius * 2, radius * 2);
         graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
         graphics.setStroke(new BasicStroke(plugin.getConfig().outlineWidth()));
-        graphics.drawOval(canvasPoint.getX() - radius, canvasPoint.getY() - radius, radius * 2, radius * 2);
+
+        for (int i = 0; i < tilePolygon.npoints; i++)
+        {
+            int next = (i + 1) % tilePolygon.npoints;
+            int previous = (i + tilePolygon.npoints - 1) % tilePolygon.npoints;
+            int x = tilePolygon.xpoints[i];
+            int y = tilePolygon.ypoints[i];
+
+            drawCornerSegment(graphics, x, y,
+                    tilePolygon.xpoints[next], tilePolygon.ypoints[next]);
+            drawCornerSegment(graphics, x, y,
+                    tilePolygon.xpoints[previous], tilePolygon.ypoints[previous]);
+        }
+    }
+
+    private void drawCornerSegment(Graphics2D graphics, int startX, int startY, int endX, int endY)
+    {
+        int cornerLength = 4;
+        int x = startX + (endX - startX) / cornerLength;
+        int y = startY + (endY - startY) / cornerLength;
+        graphics.drawLine(startX, startY, x, y);
     }
 
     private void drawDot(Graphics2D graphics, LocalPoint localPoint, Color color)
