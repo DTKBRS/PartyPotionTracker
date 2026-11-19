@@ -55,6 +55,7 @@ public class PickupManager
     private final Client client;
     private final PartyService partyService;
     private final ClientThread clientThread;
+    private final PotionTrackerConfig config;
 
     private ExpectedPickup expectedPickup;
 
@@ -65,20 +66,29 @@ public class PickupManager
     @Getter
     private final List<TrackedItem> myDroppedItems = new CopyOnWriteArrayList<>();
 
+    /**
+     * Owner metadata for items that left the scene before the pickup message
+     * arrived. These records are cleared at raid/session boundaries.
+     */
+    private final List<TrackedItem> removedItems = new CopyOnWriteArrayList<>();
+
     private final List<PendingDespawn> pendingDespawns = new CopyOnWriteArrayList<>();
 
     private Map<Integer, Integer> previousInventory;
 
-    public PickupManager(Client client, PartyService partyService, ClientThread clientThread)
+    public PickupManager(Client client, PartyService partyService, ClientThread clientThread,
+                         PotionTrackerConfig config)
     {
         this.client = client;
         this.partyService = partyService;
         this.clientThread = clientThread;
+        this.config = config;
     }
 
     public void clear()
     {
         myDroppedItems.clear();
+        removedItems.clear();
         pendingDespawns.clear();
         previousInventory = null;
         expectedPickup = null;
@@ -136,6 +146,7 @@ public class PickupManager
             myDroppedItems.remove(existing);
         }
 
+        removedItems.removeIf(removed -> removed.matches(item.getItemId(), item.getWorldPoint()));
         myDroppedItems.add(item);
     }
 
@@ -163,6 +174,7 @@ public class PickupManager
         if (trackedItem != null)
         {
             myDroppedItems.remove(trackedItem);
+            removedItems.add(trackedItem);
         }
 
         pendingDespawns.removeIf(pending -> pending.itemId == itemId
@@ -174,17 +186,25 @@ public class PickupManager
         TrackedItem trackedItem = findTrackedItem(message.getItemId(), message.getWorldPoint());
         if (trackedItem == null)
         {
+            trackedItem = findRemovedItem(message.getItemId(), message.getWorldPoint());
+        }
+
+        if (trackedItem == null)
+        {
             return;
         }
 
         myDroppedItems.remove(trackedItem);
+        removedItems.remove(trackedItem);
         pendingDespawns.removeIf(pending -> pending.itemId == message.getItemId()
                 && pending.location.equals(message.getWorldPoint()));
 
         // Only report a pickup by somebody other than the owner. The owner
         // already knows they picked up their own potion.
-        if (!equalsIgnoreCase(trackedItem.getOwnerName(), message.getPickerName()))
+        if (config.showPickupMessages()
+                && !equalsIgnoreCase(trackedItem.getOwnerName(), message.getPickerName()))
         {
+            TrackedItem pickupRecord = trackedItem;
             clientThread.invokeLater(() ->
             {
                 String itemName = client.getItemDefinition(message.getItemId()).getName();
@@ -192,7 +212,7 @@ public class PickupManager
                         "%s picked up a %s dropped by %s!",
                         message.getPickerName(),
                         itemName,
-                        trackedItem.getOwnerName());
+                        pickupRecord.getOwnerName());
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", chatMessage, null);
             });
         }
@@ -312,11 +332,29 @@ public class PickupManager
             {
                 removeTrackedItem(pending.itemId, pending.location);
             }
-            else
+            else if (stillPresent)
             {
                 pendingDespawns.remove(pending);
             }
         }
+    }
+
+    private TrackedItem findRemovedItem(int itemId, WorldPoint location)
+    {
+        if (location == null)
+        {
+            return null;
+        }
+
+        for (TrackedItem item : removedItems)
+        {
+            if (item.matches(itemId, location))
+            {
+                return item;
+            }
+        }
+
+        return null;
     }
 
     private Tile getLoadedTile(WorldPoint location)

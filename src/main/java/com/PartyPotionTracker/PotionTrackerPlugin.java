@@ -13,6 +13,9 @@ import net.runelite.api.events.*;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.party.PartyService;
+import net.runelite.client.party.PartyMember;
+import net.runelite.client.party.events.UserPart;
+import net.runelite.client.party.messages.UserSync;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -21,6 +24,9 @@ import net.runelite.client.plugins.party.PartyPluginService;
 import net.runelite.client.plugins.party.data.PartyMemberData;
 import net.runelite.client.ui.overlay.OverlayManager;
 import java.awt.*;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import net.runelite.client.party.WSClient;
 
 
@@ -73,6 +79,8 @@ public class PotionTrackerPlugin extends Plugin
 	private boolean inRaid = false;
 	private int lastRegionId = Integer.MIN_VALUE;
 	private RaidRegion lastRaidRegion;
+	private final Map<Long, PartyAccountType> partyAccountTypes = new ConcurrentHashMap<>();
+	private PartyAccountType lastPublishedAccountType = PartyAccountType.UNKNOWN;
 
 
 	@Provides
@@ -85,9 +93,10 @@ public class PotionTrackerPlugin extends Plugin
 	{
 		migrateRemovedHighlightStyles();
 		dropManager = new DropManager(client, partyService);
-		pickupManager = new PickupManager(client, partyService, clientThread);
+		pickupManager = new PickupManager(client, partyService, clientThread, config);
 		wsClient.registerMessage(TrackedItemMessage.class);
 		wsClient.registerMessage(PickedUpItemMessage.class);
+		wsClient.registerMessage(AccountTypeMessage.class);
 		overlayManager.add(overlay);
 		debug("plugin started: highlightStyle={}, own={}, party={}, unknown={}",
 				config.highlightStyle(), config.highlightOwnPotions(),
@@ -116,6 +125,9 @@ public class PotionTrackerPlugin extends Plugin
 		overlayManager.remove(overlay);
 		wsClient.unregisterMessage(PickedUpItemMessage.class);
 		wsClient.unregisterMessage(TrackedItemMessage.class);
+		wsClient.unregisterMessage(AccountTypeMessage.class);
+		partyAccountTypes.clear();
+		lastPublishedAccountType = PartyAccountType.UNKNOWN;
 	}
 
 	@Subscribe
@@ -127,6 +139,37 @@ public class PotionTrackerPlugin extends Plugin
 		pickupManager.trackDrop(new TrackedItem(msg.getItemId(), msg.getWorldPoint(), msg.getOwnerName()));
 	}
 
+	@Subscribe
+	public void onAccountTypeMessage(AccountTypeMessage message)
+	{
+		if (partyService == null || !partyService.isInParty()
+				|| partyService.getMemberById(message.getMemberId()) == null)
+		{
+			return;
+		}
+
+		partyAccountTypes.put(message.getMemberId(), PartyAccountType.fromId(message.getAccountTypeId()));
+	}
+
+	@Subscribe
+	public void onUserSync(UserSync event)
+	{
+		publishAccountType(true);
+	}
+
+	@Subscribe
+	public void onUserPart(UserPart event)
+	{
+		partyAccountTypes.remove(event.getMemberId());
+	}
+
+	@Subscribe
+	public void onPartyChanged(net.runelite.client.events.PartyChanged event)
+	{
+		partyAccountTypes.clear();
+		lastPublishedAccountType = PartyAccountType.UNKNOWN;
+	}
+
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
@@ -134,6 +177,51 @@ public class PotionTrackerPlugin extends Plugin
 				event.getMenuOption(), event.getId(), event.getParam0(), event.getParam1(), inRaid);
 		if (inRaid){
 			pickupManager.menuOptionClicked(event);
+		}
+	}
+
+	@Subscribe
+	public void onMenuEntryAdded(MenuEntryAdded event)
+	{
+		if (!inRaid || !config.removeIronmanTakeOption()
+				|| !"Take".equalsIgnoreCase(event.getOption()))
+		{
+			return;
+		}
+
+		MenuAction action = MenuAction.of(event.getType());
+		if (action != MenuAction.GROUND_ITEM_FIRST_OPTION
+				&& action != MenuAction.GROUND_ITEM_SECOND_OPTION
+				&& action != MenuAction.GROUND_ITEM_THIRD_OPTION
+				&& action != MenuAction.GROUND_ITEM_FOURTH_OPTION
+				&& action != MenuAction.GROUND_ITEM_FIFTH_OPTION)
+		{
+			return;
+		}
+
+		int itemId = event.getIdentifier();
+		if (!RaidPotions.isPotion(itemId))
+		{
+			return;
+		}
+
+		WorldPoint location = getMenuWorldPoint(event);
+		TrackedItem trackedItem = pickupManager.findTrackedItem(itemId, location);
+		if (trackedItem == null || isLocalOwner(trackedItem))
+		{
+			return;
+		}
+
+		PartyAccountType accountType = getPartyAccountType(trackedItem.getOwnerName());
+		if (!accountType.isIronman() && !accountType.isGroupIronman())
+		{
+			return;
+		}
+
+		MenuEntry[] menuEntries = client.getMenuEntries();
+		if (menuEntries.length > 0)
+		{
+			client.setMenuEntries(Arrays.copyOf(menuEntries, menuEntries.length - 1));
 		}
 	}
 
@@ -163,6 +251,8 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onGameTick(GameTick tick) {
+		publishAccountType(false);
+
 		if (client.getLocalPlayer() == null) {
 			if (inRaid) {
 				pickupManager.clear();
@@ -200,6 +290,52 @@ public class PotionTrackerPlugin extends Plugin
 		if (inRaid){
 			pickupManager.gameTick();
 		}
+	}
+
+	private void publishAccountType(boolean force)
+	{
+		if (partyService == null || !partyService.isInParty() || client.getLocalPlayer() == null)
+		{
+			return;
+		}
+
+		PartyAccountType current = PartyAccountType.fromId(client.getVarbitValue(Varbits.ACCOUNT_TYPE));
+		if (!force && current == lastPublishedAccountType)
+		{
+			return;
+		}
+
+		lastPublishedAccountType = current;
+		PartyMember localMember = partyService.getLocalMember();
+		if (localMember != null)
+		{
+			partyAccountTypes.put(localMember.getMemberId(), current);
+		}
+		partyService.send(new AccountTypeMessage(current.getId()));
+	}
+
+	private WorldPoint getMenuWorldPoint(MenuEntryAdded event)
+	{
+		MenuEntry menuEntry = event.getMenuEntry();
+		WorldView worldView = client.getWorldView(menuEntry.getWorldViewId());
+		if (worldView == null)
+		{
+			return null;
+		}
+
+		return WorldPoint.fromScene(
+				worldView,
+				event.getActionParam0(),
+				event.getActionParam1(),
+				worldView.getPlane());
+	}
+
+	private boolean isLocalOwner(TrackedItem trackedItem)
+	{
+		return trackedItem != null
+				&& client.getLocalPlayer() != null
+				&& trackedItem.getOwnerName() != null
+				&& trackedItem.getOwnerName().equalsIgnoreCase(client.getLocalPlayer().getName());
 	}
 
 	@Subscribe
@@ -242,6 +378,22 @@ public class PotionTrackerPlugin extends Plugin
 		}
 
 		return Color.LIGHT_GRAY;
+	}
+
+	PartyAccountType getPartyAccountType(String name)
+	{
+		if (name == null || partyService == null || !partyService.isInParty())
+		{
+			return PartyAccountType.UNKNOWN;
+		}
+
+		PartyMember member = partyService.getMemberByDisplayName(name);
+		if (member == null)
+		{
+			return PartyAccountType.UNKNOWN;
+		}
+
+		return partyAccountTypes.getOrDefault(member.getMemberId(), PartyAccountType.UNKNOWN);
 	}
 
 	boolean isInRaid()

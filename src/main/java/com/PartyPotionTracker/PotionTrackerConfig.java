@@ -9,6 +9,7 @@ import net.runelite.client.config.Range;
 @ConfigGroup("PotionTrackerConfig")
 public interface PotionTrackerConfig extends Config{
     String HIGHLIGHT_SECTION = "highlightSection";
+    String PICKUP_SECTION = "pickupSection";
 
     @ConfigSection(
             name = "Potion highlighting",
@@ -16,6 +17,13 @@ public interface PotionTrackerConfig extends Config{
             position = 0
     )
     String highlightSection = "highlightSection";
+
+    @ConfigSection(
+            name = "Pickup behavior",
+            description = "Controls which potion pickup actions are available",
+            position = 1
+    )
+    String pickupSection = "pickupSection";
 
     @ConfigItem(
             keyName = "highlightOwnPotions",
@@ -71,6 +79,28 @@ public interface PotionTrackerConfig extends Config{
     )
     default int outlineWidth(){
         return 2;
+    }
+
+    @ConfigItem(
+            keyName = "removeIronmanTakeOption",
+            name = "Remove Take from Ironman potions",
+            description = "Remove the Take option when a known Ironman party member owns the potion",
+            section = PICKUP_SECTION,
+            position = 1
+    )
+    default boolean removeIronmanTakeOption(){
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "showPickupMessages",
+            name = "Show pickup messages",
+            description = "Show a game message when another player picks up a tracked potion",
+            section = PICKUP_SECTION,
+            position = 2
+    )
+    default boolean showPickupMessages(){
+        return true;
     }
 
     enum HighlightStyle
