@@ -154,7 +154,7 @@ public class PotionTrackerPlugin extends Plugin
 	@Subscribe
 	public void onUserSync(UserSync event)
 	{
-		publishAccountType(true);
+		clientThread.invokeLater(() -> publishAccountType(true));
 	}
 
 	@Subscribe
