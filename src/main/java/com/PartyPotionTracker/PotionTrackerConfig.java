@@ -82,6 +82,17 @@ public interface PotionTrackerConfig extends Config{
     }
 
     @ConfigItem(
+            keyName = "showIronmanIcons",
+            name = "Show Ironman icons",
+            description = "Show an Ironman icon beside potions owned by a known Ironman party member",
+            section = HIGHLIGHT_SECTION,
+            position = 6
+    )
+    default boolean showIronmanIcons(){
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "removeIronmanTakeOption",
             name = "Remove Take from Ironman potions",
             description = "Remove the Take option when a known Ironman party member owns the potion",
