@@ -5,7 +5,6 @@ import javax.inject.Inject;
 import com.google.inject.Provides;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -33,7 +32,6 @@ import net.runelite.client.party.WSClient;
 
 
 @PluginDependency(PartyPlugin.class)
-@Slf4j
 @PluginDescriptor(
 	name = "Party Potion Tracker",
 		 description = "Tracks and highlights raid supplies dropped in parties, and shows who picks them up",
@@ -41,8 +39,6 @@ import net.runelite.client.party.WSClient;
 )
 public class PotionTrackerPlugin extends Plugin
 {
-	private static final boolean DEBUG_LOGGING = Boolean.getBoolean("ppt.debug");
-
 	@Inject
 	private WSClient wsClient;
 
@@ -98,9 +94,6 @@ public class PotionTrackerPlugin extends Plugin
 		wsClient.registerMessage(PickedUpItemMessage.class);
 		wsClient.registerMessage(AccountTypeMessage.class);
 		overlayManager.add(overlay);
-		debug("plugin started: highlightStyle={}, own={}, party={}, unknown={}",
-				config.highlightStyle(), config.highlightOwnPotions(),
-				config.highlightPartyPotions(), config.highlightUnknownPotions());
 	}
 
 	private void migrateRemovedHighlightStyles()
@@ -173,8 +166,6 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
-		debug("menu option: option={}, id={}, param0={}, param1={}, inRaid={}",
-				event.getMenuOption(), event.getId(), event.getParam0(), event.getParam1(), inRaid);
 		if (inRaid){
 			pickupManager.menuOptionClicked(event);
 		}
@@ -265,24 +256,8 @@ public class PotionTrackerPlugin extends Plugin
 		WorldPoint mappedPoint = lp == null ? null : WorldPoint.fromLocalInstance(client, lp);
 		int regionId = mappedPoint == null ? -1 : mappedPoint.getRegionID();
 		RaidRegion currentRegion = RaidRegion.fromRegionId(regionId);
-		if (DEBUG_LOGGING && (regionId != lastRegionId || currentRegion != lastRaidRegion))
-		{
-			debug("raid state check: mappedPoint={}, regionId={}, raidRegion={}, inInstancedRegion={}, mapRegions={}",
-					mappedPoint,
-					regionId,
-					currentRegion,
-					client.isInInstancedRegion(),
-					client.getTopLevelWorldView() == null ? null : java.util.Arrays.toString(client.getTopLevelWorldView().getMapRegions()));
-			lastRegionId = regionId;
-			lastRaidRegion = currentRegion;
-		}
 		boolean wasInRaid = inRaid;
 		inRaid = currentRegion != null;
-		if (DEBUG_LOGGING && wasInRaid != inRaid)
-		{
-			debug("raid state changed: {} -> {}", wasInRaid, inRaid);
-		}
-
 		if (wasInRaid && !inRaid) {
 			pickupManager.clear();
 		}
@@ -340,10 +315,6 @@ public class PotionTrackerPlugin extends Plugin
 
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event) {
-		debug("item spawned event received: id={}, tile={}, inRaid={}",
-				event.getItem() == null ? null : event.getItem().getId(),
-				event.getTile() == null ? null : event.getTile().getWorldLocation(),
-				inRaid);
 		if (inRaid){
 			TrackedItem trackedItem = dropManager.itemSpawned(event);
 			if (trackedItem != null) {
@@ -399,13 +370,5 @@ public class PotionTrackerPlugin extends Plugin
 	boolean isInRaid()
 	{
 		return inRaid;
-	}
-
-	private void debug(String message, Object... arguments)
-	{
-		if (DEBUG_LOGGING)
-		{
-			log.info("[PPT DEBUG] " + message, arguments);
-		}
 	}
 }
