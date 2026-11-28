@@ -13,6 +13,8 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
+import net.runelite.client.game.SpriteManager;
+import net.runelite.api.gameval.SpriteID;
 
 import javax.inject.Inject;
 import java.awt.BasicStroke;
@@ -22,6 +24,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Stroke;
+import java.awt.image.BufferedImage;
 
 public class PotionTrackerOverlay extends Overlay
 {
@@ -31,13 +34,17 @@ public class PotionTrackerOverlay extends Overlay
     private final Client client;
     private final PotionTrackerPlugin plugin;
     private final ModelOutlineRenderer modelOutlineRenderer;
+    private final SpriteManager spriteManager;
 
     @Inject
-    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin, ModelOutlineRenderer modelOutlineRenderer)
+    public PotionTrackerOverlay(Client client, PotionTrackerPlugin plugin,
+                                ModelOutlineRenderer modelOutlineRenderer,
+                                SpriteManager spriteManager)
     {
         this.client = client;
         this.plugin = plugin;
         this.modelOutlineRenderer = modelOutlineRenderer;
+        this.spriteManager = spriteManager;
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
     }
@@ -129,7 +136,23 @@ public class PotionTrackerOverlay extends Overlay
 
             Color color = getColor(kind, trackedItem);
             drawHighlight(graphics, tile, tile.getLocalLocation(), item, color);
+
+            if (plugin.getConfig().showIronmanIcons() && isIronmanPotion(trackedItem))
+            {
+                drawIronmanIcon(graphics, tile.getLocalLocation());
+            }
         }
+    }
+
+    private boolean isIronmanPotion(TrackedItem trackedItem)
+    {
+        if (trackedItem == null || isLocalOwner(trackedItem))
+        {
+            return false;
+        }
+
+        PartyAccountType accountType = plugin.getPartyAccountType(trackedItem.getOwnerName());
+        return accountType.isIronman() || accountType.isGroupIronman();
     }
 
     private HighlightKind getHighlightKind(TileItem item, TrackedItem trackedItem)
@@ -280,6 +303,20 @@ public class PotionTrackerOverlay extends Overlay
         int radius = 4;
         graphics.setColor(withAlpha(color, OUTLINE_ALPHA));
         graphics.fillOval(canvasPoint.getX() - radius, canvasPoint.getY() - radius, radius * 2, radius * 2);
+    }
+
+    private void drawIronmanIcon(Graphics2D graphics, LocalPoint localPoint)
+    {
+        Point canvasPoint = Perspective.localToCanvas(client, localPoint, 0);
+        BufferedImage icon = spriteManager.getSprite(SpriteID.ICON_IRON_STANDARD, 0);
+        if (canvasPoint == null || icon == null)
+        {
+            return;
+        }
+
+        int x = canvasPoint.getX() - icon.getWidth() / 2;
+        int y = canvasPoint.getY() - icon.getHeight() - 8;
+        graphics.drawImage(icon, x, y, null);
     }
 
     private static Color withAlpha(Color color, int alpha)
